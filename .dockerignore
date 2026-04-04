@@ -1,0 +1,6 @@
+.env
+*.pyc
+__pycache__
+staticfiles/
+postgres_data/
+.git
