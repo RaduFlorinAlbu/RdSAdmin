@@ -4,114 +4,118 @@ from django.db import models
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Parent
+# Părinte
 # ──────────────────────────────────────────────────────────────────────────────
 class Parent(models.Model):
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField(blank=True, default="")
-    phone_number = models.CharField(max_length=30)
+    first_name = models.CharField("Prenume", max_length=100)
+    last_name = models.CharField("Nume", max_length=100)
+    email = models.EmailField("Email", blank=True, default="")
+    phone_number = models.CharField("Număr de telefon", max_length=30)
 
     class Meta:
         ordering = ["last_name", "first_name"]
-        verbose_name = "Parent"
-        verbose_name_plural = "Parents"
+        verbose_name = "Părinte"
+        verbose_name_plural = "Părinți"
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Therapist
+# Terapeut
 # ──────────────────────────────────────────────────────────────────────────────
 class Therapist(models.Model):
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
+    first_name = models.CharField("Prenume", max_length=100)
+    last_name = models.CharField("Nume", max_length=100)
 
     class Meta:
         ordering = ["last_name", "first_name"]
-        verbose_name = "Therapist"
-        verbose_name_plural = "Therapists"
+        verbose_name = "Terapeut"
+        verbose_name_plural = "Terapeuți"
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Child
+# Copil
 # ──────────────────────────────────────────────────────────────────────────────
 class Child(models.Model):
 
     class ChildType(models.TextChoices):
-        UNDERAGE = "underage", "Underage"
-        OVERAGE = "overage", "Overage"
+        UNDERAGE = "underage", "Minor"
+        OVERAGE = "overage", "Major"
 
     class Sex(models.TextChoices):
-        MALE = "male", "Male"
-        FEMALE = "female", "Female"
+        MALE = "male", "Masculin"
+        FEMALE = "female", "Feminin"
 
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    age = models.PositiveIntegerField()
+    first_name = models.CharField("Prenume", max_length=100)
+    last_name = models.CharField("Nume", max_length=100)
+    age = models.PositiveIntegerField("Vârstă")
     child_type = models.CharField(
-        "Type",
+        "Tip",
         max_length=10,
         choices=ChildType.choices,
         default=ChildType.UNDERAGE,
     )
-    sex = models.CharField(max_length=10, choices=Sex.choices)
-    diagnostic = models.TextField(blank=True, default="")
+    sex = models.CharField("Sex", max_length=10, choices=Sex.choices)
+    diagnostic = models.TextField("Diagnostic", blank=True, default="")
 
-    # One parent can have many children; each child has exactly one parent.
+    # Un părinte poate avea mai mulți copii; fiecare copil are exact un părinte.
     parent = models.ForeignKey(
         Parent,
+        verbose_name="Părinte",
         on_delete=models.CASCADE,
         related_name="children",
     )
 
     class Meta:
         ordering = ["last_name", "first_name"]
-        verbose_name = "Child"
-        verbose_name_plural = "Children"
+        verbose_name = "Copil"
+        verbose_name_plural = "Copii"
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Therapy  (each session is its own row)
+# Terapie  (fiecare ședință este o înregistrare separată)
 #
-#   Child  ──1─┐
-#               ├──> Therapy (date, start_time, duration)
-#   Therapist─1─┘
+#   Copil   ──1─┐
+#               ├──> Terapie (dată, oră start, durată)
+#   Terapeut──1─┘
 #
-#   A child can have many therapy sessions.
-#   A therapist can have many therapy sessions.
-#   Each session belongs to exactly one child AND one therapist.
+#   Un copil poate avea mai multe ședințe de terapie.
+#   Un terapeut poate avea mai multe ședințe de terapie.
+#   Fiecare ședință aparține exact unui copil ȘI unui terapeut.
 # ──────────────────────────────────────────────────────────────────────────────
 class Therapy(models.Model):
     child = models.ForeignKey(
         Child,
+        verbose_name="Copil",
         on_delete=models.CASCADE,
         related_name="therapies",
     )
     therapist = models.ForeignKey(
         Therapist,
+        verbose_name="Terapeut",
         on_delete=models.CASCADE,
         related_name="therapies",
     )
-    date = models.DateField()
-    start_time = models.TimeField()
+    date = models.DateField("Dată")
+    start_time = models.TimeField("Oră start")
     duration = models.DurationField(
+        "Durată",
         default=timedelta(hours=1, minutes=40),
-        help_text="Session duration (default 1 h 40 min).",
+        help_text="Durata ședinței (implicit 1 h 40 min).",
     )
 
     class Meta:
         ordering = ["date", "start_time"]
-        verbose_name = "Therapy session"
-        verbose_name_plural = "Therapy sessions"
-        # Prevent double-booking the same therapist at the same slot
+        verbose_name = "Ședință de terapie"
+        verbose_name_plural = "Ședințe de terapie"
+        # Previne dubla programare a aceluiași terapeut în același interval
         constraints = [
             models.UniqueConstraint(
                 fields=["therapist", "date", "start_time"],
@@ -131,33 +135,38 @@ class Therapy(models.Model):
 # ──────────────────────────────────────────────────────────────────────────────
 class Document(models.Model):
     name = models.CharField(
+        "Nume document",
         max_length=200,
-        help_text='e.g. "Birth certificate", "Medical report"',
+        help_text='ex: "Certificat de naștere", "Raport medical"',
     )
     child = models.ForeignKey(
         Child,
+        verbose_name="Copil",
         on_delete=models.CASCADE,
         related_name="documents",
     )
     exists = models.BooleanField(
+        "Există",
         default=False,
-        help_text="Has this document been provided?",
+        help_text="A fost furnizat acest document?",
     )
     creation_date = models.DateField(
+        "Dată creare",
         blank=True,
         null=True,
-        help_text="Filled in when the document is provided (exists = True).",
+        help_text="Se completează când documentul este furnizat (Există = Da).",
     )
     expiry_date = models.DateField(
+        "Dată expirare",
         blank=True,
         null=True,
-        help_text="Can be reset at any time.",
+        help_text="Poate fi resetată oricând.",
     )
 
     class Meta:
         ordering = ["child", "name"]
         verbose_name = "Document"
-        verbose_name_plural = "Documents"
+        verbose_name_plural = "Documente"
 
     def __str__(self):
         status = "✔" if self.exists else "✘"

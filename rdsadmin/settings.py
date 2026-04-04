@@ -83,7 +83,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # ---------------------------------------------------------------------------
 # Internationalisation
 # ---------------------------------------------------------------------------
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "ro"
 TIME_ZONE = "Europe/Bucharest"
 USE_I18N = True
 USE_TZ = True

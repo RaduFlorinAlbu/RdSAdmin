@@ -44,7 +44,7 @@ class ParentAdmin(admin.ModelAdmin):
     search_fields = ("first_name", "last_name", "phone_number", "email")
     inlines = [ChildInline]
 
-    @admin.display(description="# Children")
+    @admin.display(description="Nr. copii")
     def children_count(self, obj):
         return obj.children.count()
 
@@ -66,11 +66,11 @@ class ChildAdmin(admin.ModelAdmin):
     autocomplete_fields = ("parent",)
     inlines = [DocumentInline, TherapyInlineForChild]
 
-    @admin.display(description="Docs")
+    @admin.display(description="Documente")
     def docs_count(self, obj):
         return obj.documents.count()
 
-    @admin.display(description="Therapies")
+    @admin.display(description="Ședințe")
     def therapies_count(self, obj):
         return obj.therapies.count()
 
@@ -81,7 +81,7 @@ class TherapistAdmin(admin.ModelAdmin):
     search_fields = ("first_name", "last_name")
     inlines = [TherapyInlineForTherapist]
 
-    @admin.display(description="Total sessions")
+    @admin.display(description="Total ședințe")
     def therapies_count(self, obj):
         return obj.therapies.count()
 
