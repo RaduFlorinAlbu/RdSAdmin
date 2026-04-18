@@ -1,0 +1,2 @@
+# Runs daily at midnight (Romania time – container TZ is Europe/Bucharest)
+0 0 * * * python /app/manage.py recalculate_ages
