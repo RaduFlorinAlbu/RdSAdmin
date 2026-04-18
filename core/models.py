@@ -99,7 +99,7 @@ class Child(models.Model):
         choices=ChildType.choices,
         default=ChildType.UNDERAGE,
     )
-    sex = models.CharField("Sex", max_length=10, choices=Sex.choices)
+    sex = models.CharField("Sex", max_length=10, choices=Sex.choices, blank=True, default="")
     diagnostic = models.CharField(
         "Diagnostic",
         max_length=10,
@@ -142,6 +142,12 @@ class Child(models.Model):
                 self.child_type = (
                     self.ChildType.UNDERAGE if is_minor else self.ChildType.OVERAGE
                 )
+            # Sex from first CNP digit: odd (1,3,5,7) → masculin, even (2,4,6,8) → feminin
+            first = self.cnp[0]
+            if first in ('1', '3', '5', '7'):
+                self.sex = self.Sex.MALE
+            elif first in ('2', '4', '6', '8'):
+                self.sex = self.Sex.FEMALE
         super().save(*args, **kwargs)
 
     def __str__(self):

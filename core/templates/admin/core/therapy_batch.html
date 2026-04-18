@@ -1,0 +1,334 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Editează/Adaugă orar{% endblock %}
+
+{% block content_title %}<h1>Editează/Adaugă orar</h1>{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  #batch-root { max-width: 960px; }
+
+  .date-bar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .date-bar label { font-weight: bold; }
+  .date-btn {
+    padding: 6px 14px; border: 1px solid #ccc; border-radius: 4px;
+    cursor: pointer; background: #f8f8f8; font-size: 14px;
+  }
+  .date-btn.active { background: #417690; color: #fff; border-color: #417690; }
+  #session_date { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+
+  .add-table-btn {
+    margin-bottom: 20px; padding: 8px 18px;
+    background: #417690; color: #fff; border: none;
+    border-radius: 4px; cursor: pointer; font-size: 14px;
+  }
+  .add-table-btn:hover { background: #2d5269; }
+
+  .therapist-table {
+    border: 1px solid #ddd; border-radius: 6px;
+    margin-bottom: 20px; overflow: hidden;
+  }
+  .therapist-table-header {
+    background: #f0f0f0; padding: 10px 14px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid #ddd;
+  }
+  .therapist-table-header label { font-weight: bold; white-space: nowrap; }
+  .therapist-select {
+    flex: 1; padding: 5px 8px; border: 1px solid #ccc;
+    border-radius: 4px; font-size: 14px; max-width: 320px;
+  }
+  .remove-table-btn {
+    margin-left: auto; padding: 4px 10px;
+    background: #ba2121; color: #fff; border: none;
+    border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+
+  .slot-rows { padding: 8px 14px 12px; }
+  .slot-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 0; border-bottom: 1px solid #f0f0f0;
+  }
+  .slot-row:last-child { border-bottom: none; }
+  .slot-label {
+    font-size: 13px; color: #555; width: 100px; flex-shrink: 0;
+  }
+  .child-select {
+    flex: 1; padding: 5px 8px; border: 1px solid #ccc;
+    border-radius: 4px; font-size: 14px;
+  }
+  .remove-slot-btn {
+    background: none; border: none; color: #ba2121;
+    cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1;
+  }
+  .add-slot-btn {
+    margin-top: 8px; padding: 5px 12px;
+    background: #28a745; color: #fff; border: none;
+    border-radius: 4px; cursor: pointer; font-size: 13px;
+  }
+  .add-slot-btn:hover { background: #1e7e34; }
+  .add-slot-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+  .submit-bar {
+    margin-top: 10px; padding-top: 16px; border-top: 1px solid #ddd;
+  }
+  .submit-btn {
+    padding: 10px 28px; background: #417690; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 15px;
+  }
+  .submit-btn:hover { background: #2d5269; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if messages %}
+  {% for msg in messages %}
+    <div class="messagelist">
+      <li class="{{ msg.tags }}">{{ msg }}</li>
+    </div>
+  {% endfor %}
+{% endif %}
+
+<div id="batch-root">
+  <form method="post" id="batch-form">
+    {% csrf_token %}
+    <input type="hidden" name="session_date" id="session_date_hidden" value="{{ today }}">
+
+    {# ── Date selector ── #}
+    <div class="date-bar">
+      <label>Dată:</label>
+      <button type="button" class="date-btn active" id="btn-today" onclick="setDate('{{ today }}', this)">Azi</button>
+      <button type="button" class="date-btn" id="btn-tomorrow" onclick="setDate('{{ tomorrow }}', this)">Mâine</button>
+      <input type="date" id="session_date" value="{{ today }}" min="{{ today }}"
+             onchange="setDate(this.value, null)">
+    </div>
+
+    {# ── Tables container ── #}
+    <div id="tables-container"></div>
+
+    <button type="button" class="add-table-btn" onclick="addTable()">+ Adaugă tabelă terapeut</button>
+
+    <div class="submit-bar">
+      <button type="submit" class="submit-btn">Salvează toate ședințele</button>
+    </div>
+  </form>
+</div>
+
+{# ── Data for JS ── #}
+<script>
+const THERAPISTS       = {{ therapists|safe }};
+const CHILDREN         = {{ children|safe }};
+const MAX_SLOTS        = {{ max_slots }};
+const SLOT_LABELS      = {{ slot_labels|safe }};
+const MAX_CHILD_SESSIONS = 2;   // un copil poate apărea de maxim 2 ori pe zi
+
+let tableCounter = 0;
+
+// ── Constraint tracking ───────────────────────────────────────────────────────
+// Terapeut: o singură tabelă per zi → disable în celelalte dropdown-uri
+// Copil: maxim MAX_CHILD_SESSIONS apariții per zi → disable după ce limita e atinsă
+
+function getUsedTherapists() {
+  const used = new Set();
+  document.querySelectorAll('.therapist-select').forEach(sel => {
+    if (sel.value) used.add(sel.value);
+  });
+  return used;
+}
+
+function getChildCounts() {
+  const counts = {};
+  document.querySelectorAll('.child-select').forEach(sel => {
+    if (sel.value) counts[sel.value] = (counts[sel.value] || 0) + 1;
+  });
+  return counts;
+}
+
+function refreshAllTherapistDropdowns() {
+  const used = getUsedTherapists();
+  document.querySelectorAll('.therapist-select').forEach(sel => {
+    const current = sel.value;
+    Array.from(sel.options).forEach(opt => {
+      if (!opt.value) return; // placeholder — nu atinge
+      opt.disabled = used.has(opt.value) && opt.value !== current;
+    });
+  });
+}
+
+function refreshAllChildDropdowns() {
+  const counts = getChildCounts();
+  document.querySelectorAll('.child-select').forEach(sel => {
+    const current = sel.value;
+    Array.from(sel.options).forEach(opt => {
+      if (!opt.value) return; // placeholder
+      const cnt = counts[opt.value] || 0;
+      opt.disabled = cnt >= MAX_CHILD_SESSIONS && opt.value !== current;
+    });
+  });
+}
+
+// ── Fetch existing sessions from DB for a date ────────────────────────────────
+
+async function loadDateFromDB(dateVal) {
+  document.getElementById('tables-container').innerHTML =
+    '<p style="color:#888;padding:8px 0">Se încarcă…</p>';
+
+  const resp = await fetch(`?date=${dateVal}`, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  const data = await resp.json();
+
+  tableCounter = 0;
+  document.getElementById('tables-container').innerHTML = '';
+
+  if (data.tables && data.tables.length > 0) {
+    data.tables.forEach((t, i) => {
+      addTableWithIdx(i, t.therapist_id, t.children);
+    });
+  }
+
+  refreshAllTherapistDropdowns();
+  refreshAllChildDropdowns();
+}
+
+// ── Date ─────────────────────────────────────────────────────────────────────
+
+function setDate(val, btn) {
+  document.getElementById('session_date_hidden').value = val;
+  document.getElementById('session_date').value = val;
+  document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  loadDateFromDB(val);
+}
+
+// ── Option builders ───────────────────────────────────────────────────────────
+// Disabled state-ul este aplicat ulterior prin refreshAll* după inserție în DOM.
+
+function therapistOptions(selectedId) {
+  let html = '<option value="">— Alege terapeut —</option>';
+  THERAPISTS.forEach(t => {
+    const sel = String(t.id) === String(selectedId) ? ' selected' : '';
+    html += `<option value="${t.id}"${sel}>${t.last_name} ${t.first_name}</option>`;
+  });
+  return html;
+}
+
+function childOptions(selectedId) {
+  let html = '<option value="">— Alege copil —</option>';
+  CHILDREN.forEach(c => {
+    const sel = String(c.id) === String(selectedId) ? ' selected' : '';
+    html += `<option value="${c.id}"${sel}>${c.last_name} ${c.first_name}</option>`;
+  });
+  return html;
+}
+
+// ── Table / slot builders ─────────────────────────────────────────────────────
+
+function addTable() {
+  addTableWithIdx(tableCounter++, null, [null]);
+  refreshAllTherapistDropdowns();
+  refreshAllChildDropdowns();
+}
+
+function addTableWithIdx(tIdx, therapistId, children) {
+  if (tIdx >= tableCounter) tableCounter = tIdx + 1;
+
+  const div = document.createElement('div');
+  div.className = 'therapist-table';
+  div.id = `table-${tIdx}`;
+  div.dataset.slotCount = 0;
+
+  div.innerHTML = `
+    <div class="therapist-table-header">
+      <label>Terapeut:</label>
+      <select class="therapist-select" name="tables[${tIdx}][therapist]" required
+              onchange="refreshAllTherapistDropdowns()">
+        ${therapistOptions(therapistId)}
+      </select>
+      <button type="button" class="remove-table-btn" onclick="removeTable(${tIdx})">✕ Șterge</button>
+    </div>
+    <div class="slot-rows" id="slots-${tIdx}"></div>
+    <div style="padding: 0 14px 12px;">
+      <button type="button" class="add-slot-btn" id="add-slot-btn-${tIdx}"
+              onclick="addSlot(${tIdx})">+ Adaugă ședință</button>
+    </div>
+  `;
+  document.getElementById('tables-container').appendChild(div);
+
+  const kids = (children && children.length) ? children : [null];
+  kids.forEach(childId => addSlotWithValue(tIdx, childId));
+}
+
+function addSlot(tIdx) {
+  const tableEl = document.getElementById(`table-${tIdx}`);
+  if (parseInt(tableEl.dataset.slotCount) >= MAX_SLOTS) return;
+  addSlotWithValue(tIdx, null);
+  refreshAllChildDropdowns();
+}
+
+function addSlotWithValue(tIdx, childId) {
+  const tableEl = document.getElementById(`table-${tIdx}`);
+  const slotIdx = parseInt(tableEl.dataset.slotCount);
+  if (slotIdx >= MAX_SLOTS) return;
+
+  tableEl.dataset.slotCount = slotIdx + 1;
+
+  const row = document.createElement('div');
+  row.className = 'slot-row';
+  row.id = `slot-${tIdx}-${slotIdx}`;
+  row.innerHTML = `
+    <span class="slot-label">${SLOT_LABELS[slotIdx]}</span>
+    <select class="child-select" name="tables[${tIdx}][children][${slotIdx}]"
+            onchange="refreshAllChildDropdowns()">
+      ${childOptions(childId)}
+    </select>
+    <button type="button" class="remove-slot-btn" onclick="removeSlot(${tIdx}, ${slotIdx})">✕</button>
+  `;
+  document.getElementById(`slots-${tIdx}`).appendChild(row);
+
+  const btn = document.getElementById(`add-slot-btn-${tIdx}`);
+  if (parseInt(tableEl.dataset.slotCount) >= MAX_SLOTS) btn.disabled = true;
+}
+
+function removeSlot(tIdx, slotIdx) {
+  const row = document.getElementById(`slot-${tIdx}-${slotIdx}`);
+  if (row) row.remove();
+  const tableEl = document.getElementById(`table-${tIdx}`);
+  tableEl.dataset.slotCount = Math.max(0, parseInt(tableEl.dataset.slotCount) - 1);
+  const btn = document.getElementById(`add-slot-btn-${tIdx}`);
+  if (btn) btn.disabled = false;
+  renumberSlots(tIdx);
+  refreshAllChildDropdowns();
+}
+
+function renumberSlots(tIdx) {
+  const rows = document.querySelectorAll(`#slots-${tIdx} .slot-row`);
+  rows.forEach((row, i) => {
+    row.querySelector('.slot-label').textContent = SLOT_LABELS[i] || '';
+    const sel = row.querySelector('select');
+    if (sel) sel.name = `tables[${tIdx}][children][${i}]`;
+  });
+  document.getElementById(`table-${tIdx}`).dataset.slotCount = rows.length;
+  const btn = document.getElementById(`add-slot-btn-${tIdx}`);
+  if (btn) btn.disabled = rows.length >= MAX_SLOTS;
+}
+
+function removeTable(tIdx) {
+  const el = document.getElementById(`table-${tIdx}`);
+  if (el) el.remove();
+  refreshAllTherapistDropdowns();
+  refreshAllChildDropdowns();
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadDateFromDB('{{ today }}');
+});
+</script>
+{% endblock %}
