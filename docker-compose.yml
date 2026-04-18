@@ -36,6 +36,18 @@ services:
       db:
         condition: service_healthy
 
+  scheduler:
+    build: .
+    container_name: rds_scheduler
+    restart: unless-stopped
+    env_file: .env
+    command: supercronic /app/crontab
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   static_data:

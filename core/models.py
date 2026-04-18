@@ -1,6 +1,31 @@
-from datetime import timedelta
+import re
+from datetime import date
 
+from django.core.exceptions import ValidationError
 from django.db import models
+
+
+def _compute_from_cnp(cnp: str):
+    """Calculează (vârstă, este_minor) din CNP românesc folosind cifrele 2-7.
+    Logica an: dacă yy <= ultimele 2 cifre ale anului curent → 2000+yy, altfel 1900+yy.
+    Returnează None dacă CNP-ul e invalid.
+    """
+    if not re.fullmatch(r"\d{13}", cnp):
+        return None
+    yy = int(cnp[1:3])
+    mm = int(cnp[3:5])
+    dd = int(cnp[5:7])
+    current_yy = date.today().year % 100
+    century = 2000 if yy <= current_yy else 1900
+    try:
+        birth_date = date(century + yy, mm, dd)
+    except ValueError:
+        return None
+    today = date.today()
+    age = today.year - birth_date.year - (
+        (today.month, today.day) < (birth_date.month, birth_date.day)
+    )
+    return age, age < 18
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -50,9 +75,24 @@ class Child(models.Model):
         MALE = "male", "Masculin"
         FEMALE = "female", "Feminin"
 
+    class Diagnostic(models.TextChoices):
+        F84 = "F84", "F84"
+        F349 = "349", "349"
+
+    class Status(models.TextChoices):
+        ACTIV = "activ", "Activ"
+        ARHIVAT = "arhivat", "Arhivat"
+
     first_name = models.CharField("Prenume", max_length=100)
     last_name = models.CharField("Nume", max_length=100)
-    age = models.PositiveIntegerField("Vârstă")
+    cnp = models.CharField(
+        "CNP",
+        max_length=13,
+        unique=True,
+        default="",
+        help_text="13 cifre – vârsta și tipul (minor/major) se calculează automat.",
+    )
+    age = models.PositiveIntegerField("Vârstă", default=0)
     child_type = models.CharField(
         "Tip",
         max_length=10,
@@ -60,7 +100,19 @@ class Child(models.Model):
         default=ChildType.UNDERAGE,
     )
     sex = models.CharField("Sex", max_length=10, choices=Sex.choices)
-    diagnostic = models.TextField("Diagnostic", blank=True, default="")
+    diagnostic = models.CharField(
+        "Diagnostic",
+        max_length=10,
+        choices=Diagnostic.choices,
+        blank=False,
+        default="",
+    )
+    status = models.CharField(
+        "Status",
+        max_length=10,
+        choices=Status.choices,
+        default=Status.ACTIV,
+    )
 
     # Un părinte poate avea mai mulți copii; fiecare copil are exact un părinte.
     parent = models.ForeignKey(
@@ -74,6 +126,23 @@ class Child(models.Model):
         ordering = ["last_name", "first_name"]
         verbose_name = "Copil"
         verbose_name_plural = "Copii"
+
+    def clean(self):
+        if self.cnp:
+            if _compute_from_cnp(self.cnp) is None:
+                raise ValidationError(
+                    {"cnp": "CNP invalid – trebuie să conțină exact 13 cifre corecte."}
+                )
+
+    def save(self, *args, **kwargs):
+        if self.cnp:
+            result = _compute_from_cnp(self.cnp)
+            if result is not None:
+                self.age, is_minor = result
+                self.child_type = (
+                    self.ChildType.UNDERAGE if is_minor else self.ChildType.OVERAGE
+                )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
@@ -105,11 +174,6 @@ class Therapy(models.Model):
     )
     date = models.DateField("Dată")
     start_time = models.TimeField("Oră start")
-    duration = models.DurationField(
-        "Durată",
-        default=timedelta(hours=1, minutes=40),
-        help_text="Durata ședinței (implicit 1 h 40 min).",
-    )
 
     class Meta:
         ordering = ["date", "start_time"]

@@ -9,8 +9,21 @@ from .models import Child, Document, Parent, Therapist, Therapy
 class ChildInline(admin.TabularInline):
     model = Child
     extra = 0
-    fields = ("first_name", "last_name", "age", "child_type", "sex", "diagnostic")
+    fields = ("first_name", "last_name", "cnp", "_varsta", "_tip_copil", "status", "sex", "diagnostic")
+    readonly_fields = ("_varsta", "_tip_copil")
     show_change_link = True
+
+    @admin.display(description="Vârstă")
+    def _varsta(self, obj):
+        if not obj.cnp:
+            return "Necalculat"
+        return obj.age
+
+    @admin.display(description="Tip")
+    def _tip_copil(self, obj):
+        if not obj.cnp:
+            return "Necalculat"
+        return obj.get_child_type_display()
 
 
 class DocumentInline(admin.TabularInline):
@@ -23,7 +36,7 @@ class TherapyInlineForChild(admin.TabularInline):
     """Therapies shown inside the Child form."""
     model = Therapy
     extra = 0
-    fields = ("therapist", "date", "start_time", "duration")
+    fields = ("therapist", "date", "start_time")
     show_change_link = True
 
 
@@ -31,7 +44,7 @@ class TherapyInlineForTherapist(admin.TabularInline):
     """Therapies shown inside the Therapist form."""
     model = Therapy
     extra = 0
-    fields = ("child", "date", "start_time", "duration")
+    fields = ("child", "date", "start_time")
     show_change_link = True
 
 
@@ -44,9 +57,9 @@ class ParentAdmin(admin.ModelAdmin):
     search_fields = ("first_name", "last_name", "phone_number", "email")
     inlines = [ChildInline]
 
-    @admin.display(description="Nr. copii")
+    @admin.display(description="Nr. copii activi")
     def children_count(self, obj):
-        return obj.children.count()
+        return obj.children.filter(status="activ").count()
 
 
 @admin.register(Child)
@@ -54,17 +67,36 @@ class ChildAdmin(admin.ModelAdmin):
     list_display = (
         "first_name",
         "last_name",
-        "age",
-        "child_type",
+        "cnp",
+        "_varsta",
+        "_tip_copil",
         "sex",
+        "status",
         "parent",
         "docs_count",
         "therapies_count",
     )
-    list_filter = ("child_type", "sex")
-    search_fields = ("first_name", "last_name", "diagnostic")
+    list_filter = ("child_type", "sex", "status", "diagnostic")
+    search_fields = ("first_name", "last_name", "cnp")
     autocomplete_fields = ("parent",)
+    readonly_fields = ("_varsta", "_tip_copil")
+    fields = (
+        "first_name", "last_name", "cnp", "_varsta", "_tip_copil",
+        "sex", "status", "diagnostic", "parent",
+    )
     inlines = [DocumentInline, TherapyInlineForChild]
+
+    @admin.display(description="Vârstă")
+    def _varsta(self, obj):
+        if not obj.cnp:
+            return "Necalculat"
+        return obj.age
+
+    @admin.display(description="Tip")
+    def _tip_copil(self, obj):
+        if not obj.cnp:
+            return "Necalculat"
+        return obj.get_child_type_display()
 
     @admin.display(description="Documente")
     def docs_count(self, obj):
@@ -88,7 +120,7 @@ class TherapistAdmin(admin.ModelAdmin):
 
 @admin.register(Therapy)
 class TherapyAdmin(admin.ModelAdmin):
-    list_display = ("child", "therapist", "date", "start_time", "duration")
+    list_display = ("child", "therapist", "date", "start_time")
     list_filter = ("date", "therapist")
     search_fields = (
         "child__first_name",
