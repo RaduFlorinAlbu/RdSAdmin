@@ -1,0 +1,86 @@
+{% extends "admin/base.html" %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  /* ── Primary brand colour (#1ea0f7) ── */
+  :root {
+    --primary: #1ea0f7;
+    --secondary: #004472;
+    --breadcrumbs-bg: #004472;
+    --breadcrumbs-fg: #fff;
+    --breadcrumbs-link-fg: #fff;
+    --breadcrumbs-link-hover: rgba(255,255,255,.75);
+    --link-fg: #1ea0f7;
+    --link-hover-fg: #1a6bbf;
+    --darkened-bg: #eaf4fd;
+  }
+
+  /* Header / nav bar */
+  #header { background: #1ea0f7; }
+  #header a:link, #header a:visited { color: #fff; }
+  div#user-tools a { color: #fff; border-bottom-color: rgba(255,255,255,.5); }
+  div#user-tools a:hover { color: #fff; border-bottom-color: #fff; }
+
+  /* Breadcrumbs bar */
+  div.breadcrumbs {
+    background: #004472;
+    color: #fff;
+  }
+  div.breadcrumbs a { color: #fff; }
+  div.breadcrumbs a:hover { color: rgba(255,255,255,.8); }
+
+  /* Buttons */
+  .button, input[type=submit], input[type=button],
+  .submit-row input, a.button {
+    background: #1ea0f7;
+    border-color: #1a6bbf;
+  }
+  .button:hover, input[type=submit]:hover, input[type=button]:hover,
+  .submit-row input:hover, a.button:hover {
+    background: #1a6bbf;
+  }
+  .button.default, input[type=submit].default, .submit-row input.default {
+    background: #1ea0f7;
+    border-color: #1a6bbf;
+  }
+  .button.default:hover { background: #1a6bbf; }
+
+  /* Module headers (app labels, change-list header) */
+  .module h2, .module caption, .inline-group h2 {
+    background: #1ea0f7;
+    color: #fff;
+  }
+  .module h2 a, .module h2 a:link, .module h2 a:visited,
+  .module caption a, .module caption a:link, .module caption a:visited {
+    color: #fff !important;
+  }
+
+  /* Active nav sidebar link */
+  #nav-sidebar .current-app .section:link,
+  #nav-sidebar .current-app .section:visited {
+    color: #1ea0f7;
+  }
+  #nav-sidebar tr.selected { background: #eaf4fd; }
+
+  /* Links */
+  a:link, a:visited { color: #1ea0f7; }
+  a:hover { color: #1a6bbf; }
+
+  /* Selected checkboxes row highlight */
+  tr.selected { background-color: #eaf4fd; }
+
+  /* Paginator active */
+  .paginator a:focus, .paginator a:hover { background: #1ea0f7; }
+  .paginator .this-page { background: #1ea0f7; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // Redirect the sidebar app-section link to the dashboard and label it "Acasă"
+  document.querySelectorAll('#nav-sidebar .section').forEach(function (a) {
+    a.textContent = 'Acasă';
+    a.href = '/admin/';
+  });
+});
+</script>
+{% endblock %}

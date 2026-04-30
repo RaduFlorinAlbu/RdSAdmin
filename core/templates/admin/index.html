@@ -2,10 +2,19 @@
 {% load i18n %}
 
 {% block content %}
+<style>
+  .btn-orar,
+  .btn-orar:link,
+  .btn-orar:visited {
+    display: inline-block; padding: 10px 20px;
+    background: #1ea0f7; color: #fff !important;
+    border-radius: 4px; text-decoration: none; font-size: 15px;
+    transition: background .15s;
+  }
+  .btn-orar:hover { background: #1a6bbf; color: #fff !important; }
+</style>
 <div style="margin-bottom:16px;">
-  <a href="/admin/core/therapy/batch/"
-     style="display:inline-block;padding:10px 20px;background:#417690;color:#fff;
-            border-radius:4px;text-decoration:none;font-size:15px;">
+  <a href="/admin/core/therapy/batch/" class="btn-orar">
     &#xFF0B; Editează/Adaugă orar
   </a>
 </div>
