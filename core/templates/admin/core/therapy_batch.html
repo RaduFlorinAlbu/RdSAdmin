@@ -19,19 +19,19 @@
     padding: 6px 14px; border: 1px solid #ccc; border-radius: 4px;
     cursor: pointer; background: #f8f8f8; font-size: 14px;
   }
-  .date-btn.active { background: #417690; color: #fff; border-color: #417690; }
+  .date-btn.active { background: #318CE7; color: #fff; border-color: #318CE7; }
   #session_date { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
 
   .add-table-btn {
     margin-bottom: 20px; padding: 8px 18px;
-    background: #417690; color: #fff; border: none;
+    background: #318CE7; color: #fff; border: none;
     border-radius: 4px; cursor: pointer; font-size: 14px;
   }
-  .add-table-btn:hover { background: #2d5269; }
+  .add-table-btn:hover { background: #1a6bbf; }
 
   .therapist-table {
     border: 1px solid #ddd; border-radius: 6px;
-    margin-bottom: 20px; overflow: hidden;
+    margin-bottom: 20px;
   }
   .therapist-table-header {
     background: #f0f0f0; padding: 10px 14px;
@@ -78,10 +78,45 @@
     margin-top: 10px; padding-top: 16px; border-top: 1px solid #ddd;
   }
   .submit-btn {
-    padding: 10px 28px; background: #417690; color: #fff;
+    padding: 10px 28px; background: #318CE7; color: #fff;
     border: none; border-radius: 4px; cursor: pointer; font-size: 15px;
   }
-  .submit-btn:hover { background: #2d5269; }
+  .submit-btn:hover { background: #1a6bbf; }
+
+  /* ── Searchable select ── */
+  .searchable-select {
+    position: relative;
+    flex: 1;
+    max-width: 320px;
+  }
+  .slot-row .searchable-select {
+    max-width: none;
+  }
+  .search-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .search-input:focus { outline: none; border-color: #318CE7; box-shadow: 0 0 0 2px rgba(49,140,231,.2); }
+  .dropdown-list {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    max-height: 224px; /* ~7 items at ~32px each */
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0,0,0,.18);
+  }
+  .dropdown-option {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .dropdown-option:hover:not(.disabled-option) { background: #e8f0fe; }
+  .dropdown-option.disabled-option { color: #bbb; cursor: not-allowed; }
+  .dropdown-option.selected-option { background: #f0f4ff; font-weight: 600; }
 </style>
 {% endblock %}
 
@@ -121,17 +156,105 @@
 
 {# ── Data for JS ── #}
 <script>
-const THERAPISTS       = {{ therapists|safe }};
-const CHILDREN         = {{ children|safe }};
-const MAX_SLOTS        = {{ max_slots }};
-const SLOT_LABELS      = {{ slot_labels|safe }};
-const MAX_CHILD_SESSIONS = 2;   // un copil poate apărea de maxim 2 ori pe zi
+const THERAPISTS         = {{ therapists|safe }};
+const CHILDREN           = {{ children|safe }};
+const MAX_SLOTS          = {{ max_slots }};
+const SLOT_LABELS        = {{ slot_labels|safe }};
+const MAX_CHILD_SESSIONS = 2;
 
 let tableCounter = 0;
 
+// ── Searchable select component ───────────────────────────────────────────────
+
+function buildSearchableSelect(selectEl, type) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'searchable-select';
+  selectEl.parentNode.insertBefore(wrapper, selectEl);
+  wrapper.appendChild(selectEl);
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'search-input';
+  input.placeholder = type === 'therapist' ? 'Caută terapeut…' : 'Caută copil…';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+
+  // Dropdown lives on <body> so it's never clipped by table overflow
+  const dropdown = document.createElement('div');
+  dropdown.className = 'dropdown-list';
+  dropdown.style.cssText = 'display:none;position:fixed;z-index:99999;';
+  document.body.appendChild(dropdown);
+
+  wrapper.insertBefore(input, selectEl);
+
+  function positionDropdown() {
+    const r = input.getBoundingClientRect();
+    dropdown.style.top   = r.bottom + 'px';
+    dropdown.style.left  = r.left   + 'px';
+    dropdown.style.width = r.width  + 'px';
+  }
+
+  function syncInputText() {
+    if (selectEl.value) {
+      const opt = Array.from(selectEl.options).find(o => o.value === selectEl.value);
+      if (opt) { input.value = opt.text; return; }
+    }
+    input.value = '';
+  }
+  syncInputText();
+
+  function renderDropdown(filter) {
+    dropdown.innerHTML = '';
+    const filterLow = (filter || '').toLowerCase().trim();
+    Array.from(selectEl.options).forEach(opt => {
+      if (!opt.value) return;
+      if (filterLow && !opt.text.toLowerCase().includes(filterLow)) return;
+      const item = document.createElement('div');
+      item.className = 'dropdown-option' +
+        (opt.disabled ? ' disabled-option' : '') +
+        (opt.value === selectEl.value ? ' selected-option' : '');
+      item.textContent = opt.text;
+      if (!opt.disabled) {
+        item.addEventListener('mousedown', e => {
+          e.preventDefault();
+          selectEl.value = opt.value;
+          syncInputText();
+          dropdown.style.display = 'none';
+          if (type === 'therapist') refreshAllTherapistDropdowns();
+          else refreshAllChildDropdowns();
+        });
+      }
+      dropdown.appendChild(item);
+    });
+    if (dropdown.children.length) {
+      positionDropdown();
+      dropdown.style.display = 'block';
+    } else {
+      dropdown.style.display = 'none';
+    }
+  }
+
+  input.addEventListener('focus', () => { input.select(); renderDropdown(input.value); });
+  input.addEventListener('input', () => renderDropdown(input.value));
+  input.addEventListener('blur', () => {
+    setTimeout(() => { dropdown.style.display = 'none'; syncInputText(); }, 150);
+  });
+
+  // Reposition on scroll/resize so dropdown stays glued to input
+  window.addEventListener('scroll', () => {
+    if (dropdown.style.display !== 'none') positionDropdown();
+  }, { passive: true });
+  window.addEventListener('resize', () => {
+    if (dropdown.style.display !== 'none') positionDropdown();
+  }, { passive: true });
+
+  wrapper._refreshDisplay = () => {
+    syncInputText();
+    if (dropdown.style.display !== 'none') renderDropdown(input.value);
+  };
+}
+
 // ── Constraint tracking ───────────────────────────────────────────────────────
-// Terapeut: o singură tabelă per zi → disable în celelalte dropdown-uri
-// Copil: maxim MAX_CHILD_SESSIONS apariții per zi → disable după ce limita e atinsă
 
 function getUsedTherapists() {
   const used = new Set();
@@ -139,6 +262,32 @@ function getUsedTherapists() {
     if (sel.value) used.add(sel.value);
   });
   return used;
+}
+
+function refreshAllTherapistDropdowns() {
+  const used = getUsedTherapists();
+  document.querySelectorAll('.therapist-select').forEach(sel => {
+    const current = sel.value;
+    Array.from(sel.options).forEach(opt => {
+      if (!opt.value) return;
+      opt.disabled = used.has(opt.value) && opt.value !== current;
+    });
+    const wrapper = sel.parentElement;
+    if (wrapper && wrapper._refreshDisplay) wrapper._refreshDisplay();
+  });
+}
+
+function getChildTableMap() {
+  // { childId: Set of tableEl.id } — tracks which table each child is assigned to
+  const map = {};
+  document.querySelectorAll('.child-select').forEach(sel => {
+    if (!sel.value) return;
+    const tableEl = sel.closest('.therapist-table');
+    const tId = tableEl ? tableEl.id : '__none__';
+    if (!map[sel.value]) map[sel.value] = new Set();
+    map[sel.value].add(tId);
+  });
+  return map;
 }
 
 function getChildCounts() {
@@ -149,26 +298,24 @@ function getChildCounts() {
   return counts;
 }
 
-function refreshAllTherapistDropdowns() {
-  const used = getUsedTherapists();
-  document.querySelectorAll('.therapist-select').forEach(sel => {
-    const current = sel.value;
-    Array.from(sel.options).forEach(opt => {
-      if (!opt.value) return; // placeholder — nu atinge
-      opt.disabled = used.has(opt.value) && opt.value !== current;
-    });
-  });
-}
-
 function refreshAllChildDropdowns() {
+  const childTableMap = getChildTableMap();
   const counts = getChildCounts();
   document.querySelectorAll('.child-select').forEach(sel => {
     const current = sel.value;
+    const tableEl = sel.closest('.therapist-table');
+    const thisTId = tableEl ? tableEl.id : '__none__';
     Array.from(sel.options).forEach(opt => {
-      if (!opt.value) return; // placeholder
-      const cnt = counts[opt.value] || 0;
-      opt.disabled = cnt >= MAX_CHILD_SESSIONS && opt.value !== current;
+      if (!opt.value) return;
+      const tables = childTableMap[opt.value];
+      // Disable if used in a different therapist's table
+      const usedElsewhere = tables ? [...tables].some(t => t !== thisTId) : false;
+      // Disable if at or over the global max (2 per day)
+      const overLimit = (counts[opt.value] || 0) >= MAX_CHILD_SESSIONS;
+      opt.disabled = (usedElsewhere || overLimit) && opt.value !== current;
     });
+    const wrapper = sel.parentElement;
+    if (wrapper && wrapper._refreshDisplay) wrapper._refreshDisplay();
   });
 }
 
@@ -187,9 +334,7 @@ async function loadDateFromDB(dateVal) {
   document.getElementById('tables-container').innerHTML = '';
 
   if (data.tables && data.tables.length > 0) {
-    data.tables.forEach((t, i) => {
-      addTableWithIdx(i, t.therapist_id, t.children);
-    });
+    data.tables.forEach((t, i) => addTableWithIdx(i, t.therapist_id, t.children));
   }
 
   refreshAllTherapistDropdowns();
@@ -207,10 +352,9 @@ function setDate(val, btn) {
 }
 
 // ── Option builders ───────────────────────────────────────────────────────────
-// Disabled state-ul este aplicat ulterior prin refreshAll* după inserție în DOM.
 
 function therapistOptions(selectedId) {
-  let html = '<option value="">— Alege terapeut —</option>';
+  let html = '<option value=""></option>';
   THERAPISTS.forEach(t => {
     const sel = String(t.id) === String(selectedId) ? ' selected' : '';
     html += `<option value="${t.id}"${sel}>${t.last_name} ${t.first_name}</option>`;
@@ -219,7 +363,7 @@ function therapistOptions(selectedId) {
 }
 
 function childOptions(selectedId) {
-  let html = '<option value="">— Alege copil —</option>';
+  let html = '<option value=""></option>';
   CHILDREN.forEach(c => {
     const sel = String(c.id) === String(selectedId) ? ' selected' : '';
     html += `<option value="${c.id}"${sel}>${c.last_name} ${c.first_name}</option>`;
@@ -246,8 +390,7 @@ function addTableWithIdx(tIdx, therapistId, children) {
   div.innerHTML = `
     <div class="therapist-table-header">
       <label>Terapeut:</label>
-      <select class="therapist-select" name="tables[${tIdx}][therapist]" required
-              onchange="refreshAllTherapistDropdowns()">
+      <select class="therapist-select" name="tables[${tIdx}][therapist]" style="display:none">
         ${therapistOptions(therapistId)}
       </select>
       <button type="button" class="remove-table-btn" onclick="removeTable(${tIdx})">✕ Șterge</button>
@@ -259,6 +402,7 @@ function addTableWithIdx(tIdx, therapistId, children) {
     </div>
   `;
   document.getElementById('tables-container').appendChild(div);
+  buildSearchableSelect(div.querySelector('.therapist-select'), 'therapist');
 
   const kids = (children && children.length) ? children : [null];
   kids.forEach(childId => addSlotWithValue(tIdx, childId));
@@ -283,13 +427,13 @@ function addSlotWithValue(tIdx, childId) {
   row.id = `slot-${tIdx}-${slotIdx}`;
   row.innerHTML = `
     <span class="slot-label">${SLOT_LABELS[slotIdx]}</span>
-    <select class="child-select" name="tables[${tIdx}][children][${slotIdx}]"
-            onchange="refreshAllChildDropdowns()">
+    <select class="child-select" name="tables[${tIdx}][children][${slotIdx}]" style="display:none">
       ${childOptions(childId)}
     </select>
     <button type="button" class="remove-slot-btn" onclick="removeSlot(${tIdx}, ${slotIdx})">✕</button>
   `;
   document.getElementById(`slots-${tIdx}`).appendChild(row);
+  buildSearchableSelect(row.querySelector('.child-select'), 'child');
 
   const btn = document.getElementById(`add-slot-btn-${tIdx}`);
   if (parseInt(tableEl.dataset.slotCount) >= MAX_SLOTS) btn.disabled = true;
