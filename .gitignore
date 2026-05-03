@@ -1,0 +1,17 @@
+# Private keys and certificates – never commit these
+certs/*.pem
+certs/*.key
+certs/*.crt
+
+# Django
+__pycache__/
+*.pyc
+*.pyo
+staticfiles/
+*.log
+
+# Environment
+.env
+
+# VS Code
+.vscode/

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from django import forms
 from django.contrib import admin
@@ -181,12 +181,22 @@ class RdsAdminSite(admin.AdminSite):
     index_title = "Dashboard"
 
     def get_urls(self):
-        from .views import TherapyBatchView
+        from .views import TherapyBatchView, RaportLunarView, RaportAnualView
         custom = [
             path(
                 "core/therapy/batch/",
                 self.admin_view(TherapyBatchView.as_view()),
                 name="therapy_batch",
+            ),
+            path(
+                "core/rapoarte/lunar/",
+                self.admin_view(RaportLunarView.as_view()),
+                name="raport_lunar",
+            ),
+            path(
+                "core/rapoarte/anual/",
+                self.admin_view(RaportAnualView.as_view()),
+                name="raport_anual",
             ),
         ]
         return custom + super().get_urls()
@@ -194,6 +204,8 @@ class RdsAdminSite(admin.AdminSite):
     def each_context(self, request):
         ctx = super().each_context(request)
         ctx["batch_therapy_url"] = "core/therapy/batch/"
+        ctx["raport_lunar_url"]  = "core/rapoarte/lunar/"
+        ctx["raport_anual_url"]  = "core/rapoarte/anual/"
         return ctx
 
 
@@ -287,7 +299,9 @@ class ChildAdmin(admin.ModelAdmin):
         "status",
         "parent",
         "docs_count",
-        "therapies_count",
+        "_terapii_luna_curenta",
+        "_terapii_luna_anterioara",
+        "_terapii_an_curent",
     )
     list_filter = ("child_type", "sex", "status", "diagnostic")
     search_fields = ("first_name", "last_name", "cnp")
@@ -321,20 +335,42 @@ class ChildAdmin(admin.ModelAdmin):
     def docs_count(self, obj):
         return obj.documents.count()
 
-    @admin.display(description="Ședințe")
-    def therapies_count(self, obj):
-        return obj.therapies.count()
+    @admin.display(description="Terapii luna curentă")
+    def _terapii_luna_curenta(self, obj):
+        today = date.today()
+        return obj.therapies.filter(date__year=today.year, date__month=today.month).count()
+
+    @admin.display(description="Terapii luna anterioară")
+    def _terapii_luna_anterioara(self, obj):
+        today = date.today()
+        prev = today.replace(day=1) - timedelta(days=1)
+        return obj.therapies.filter(date__year=prev.year, date__month=prev.month).count()
+
+    @admin.display(description="Terapii an curent")
+    def _terapii_an_curent(self, obj):
+        return obj.therapies.filter(date__year=date.today().year).count()
 
 
 @admin.register(Therapist, site=admin_site)
 class TherapistAdmin(admin.ModelAdmin):
-    list_display = ("first_name", "last_name", "therapies_count")
+    list_display = ("first_name", "last_name", "_terapii_luna_curenta", "_terapii_luna_anterioara", "_terapii_an_curent")
     search_fields = ("first_name", "last_name")
     inlines = []
 
-    @admin.display(description="Total ședințe")
-    def therapies_count(self, obj):
-        return obj.therapies.count()
+    @admin.display(description="Terapii luna curentă")
+    def _terapii_luna_curenta(self, obj):
+        today = date.today()
+        return obj.therapies.filter(date__year=today.year, date__month=today.month).count()
+
+    @admin.display(description="Terapii luna anterioară")
+    def _terapii_luna_anterioara(self, obj):
+        today = date.today()
+        prev = today.replace(day=1) - timedelta(days=1)
+        return obj.therapies.filter(date__year=prev.year, date__month=prev.month).count()
+
+    @admin.display(description="Terapii an curent")
+    def _terapii_an_curent(self, obj):
+        return obj.therapies.filter(date__year=date.today().year).count()
 
 
 @admin.register(Therapy, site=admin_site)

@@ -9,9 +9,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - postgres_data:/var/lib/postgresql/data   # persistent named volume
+    networks:
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -29,12 +29,24 @@ services:
              python manage.py runserver 0.0.0.0:8000"
     volumes:
       - .:/app
-      - static_data:/app/staticfiles
-    ports:
-      - "8000:8000"
+      - static_data:/app/staticfiles   # persistent named volume
+    networks:
+      - internal
+      - proxy
     depends_on:
       db:
         condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      # HTTPS router
+      - "traefik.http.routers.rds.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.rds.entrypoints=websecure"
+      - "traefik.http.routers.rds.tls=true"
+      - "traefik.http.services.rds.loadbalancer.server.port=8000"
+      # HTTP router – redirected to HTTPS by the entrypoint redirect
+      - "traefik.http.routers.rds-http.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.rds-http.entrypoints=web"
 
   scheduler:
     build: .
@@ -44,10 +56,33 @@ services:
     command: supercronic /app/crontab
     volumes:
       - .:/app
+    networks:
+      - internal
     depends_on:
       db:
         condition: service_healthy
 
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --configFile=/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/traefik:ro
+      - ./dynamic:/dynamic:ro
+      - ./certs:/certs:ro
+    networks:
+      - proxy
+
+networks:
+  proxy:       # Traefik ↔ web
+  internal:    # web ↔ db ↔ scheduler (not reachable from outside)
+
 volumes:
-  postgres_data:
-  static_data:
+  postgres_data:   # PostgreSQL data – survives container restarts/rebuilds
+  static_data:     # Django collectstatic output

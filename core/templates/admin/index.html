@@ -12,10 +12,26 @@
     transition: background .15s;
   }
   .btn-orar:hover { background: #1a6bbf; color: #fff !important; }
+
+  .btn-raport,
+  .btn-raport:link,
+  .btn-raport:visited {
+    display: inline-block; padding: 10px 20px;
+    background: #004472; color: #fff !important;
+    border-radius: 4px; text-decoration: none; font-size: 15px;
+    transition: background .15s;
+  }
+  .btn-raport:hover { background: #003359; color: #fff !important; }
 </style>
-<div style="margin-bottom:16px;">
+<div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:10px;">
   <a href="/admin/core/therapy/batch/" class="btn-orar">
     &#xFF0B; Editează/Adaugă orar
+  </a>
+  <a href="/admin/core/rapoarte/lunar/" class="btn-raport">
+    &#x1F4CA; Raport lunar
+  </a>
+  <a href="/admin/core/rapoarte/anual/" class="btn-raport">
+    &#x1F4CB; Raport anual
   </a>
 </div>
 {{ block.super }}
