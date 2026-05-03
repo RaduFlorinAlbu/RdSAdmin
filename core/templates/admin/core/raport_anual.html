@@ -1,0 +1,149 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Raport anual{% endblock %}
+{% block content_title %}<h1>Raport anual — {{ year }}</h1>{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  .raport-filters {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 12px; margin-bottom: 20px;
+  }
+  .raport-filters label { font-weight: bold; }
+  .raport-filters select, .raport-filters button {
+    padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px;
+    font-size: 14px;
+  }
+  .raport-filters button {
+    background: #318CE7; color: #fff; border-color: #1a6bbf; cursor: pointer;
+  }
+  .raport-filters button:hover { background: #1a6bbf; }
+
+  .raport-wrap { overflow-x: auto; }
+  .raport-table {
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 100%;
+    white-space: nowrap;
+  }
+  .raport-table th, .raport-table td {
+    border: 1px solid #ddd;
+    padding: 5px 8px;
+    text-align: center;
+  }
+  .raport-table th {
+    background: #318CE7; color: #fff; position: sticky; top: 0;
+  }
+  .raport-table th.col-left { text-align: left; }
+  .raport-table tbody tr:nth-child(even) { background: #f5f8ff; }
+  .raport-table tbody tr:hover { background: #ddeeff; }
+  .raport-table td.col-left { text-align: left; }
+  .raport-table td.total-col { font-weight: bold; background: #e8f4fd; }
+  .raport-table td.zero { color: #ccc; }
+
+  .back-links { margin-bottom: 16px; display: flex; gap: 16px; }
+  .back-links a {
+    color: #318CE7; text-decoration: none; font-size: 14px;
+  }
+  .back-links a:hover { text-decoration: underline; }
+  .no-data { color: #888; padding: 20px 0; font-style: italic; }
+
+  .raport-search-bars {
+    display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 16px; align-items: flex-end;
+  }
+  .search-filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .search-filter-group label { font-weight: bold; font-size: 13px; }
+  .search-input-wrap { display: flex; align-items: center; gap: 4px; }
+  .search-input-wrap input {
+    padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 200px;
+  }
+  .search-input-wrap input:focus { outline: none; border-color: #318CE7; }
+  .search-input-wrap .clear-btn {
+    padding: 5px 8px; background: #aaa; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 1;
+  }
+  .search-input-wrap .clear-btn:hover { background: #555; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="back-links">
+  <a href="/admin/">← Acasă</a>
+  <a href="/admin/core/rapoarte/lunar/?an={{ year }}">↕ Raport lunar {{ year }}</a>
+</div>
+
+<form method="get" class="raport-filters">
+  <label for="sel-an">An:</label>
+  <select id="sel-an" name="an">
+    {% for y in years %}
+      <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Afișează</button>
+</form>
+
+<div class="raport-search-bars">
+  <div class="search-filter-group">
+    <label for="filter-child">Filtrează copil:</label>
+    <div class="search-input-wrap">
+      <input type="text" id="filter-child" placeholder="Caută copil…" oninput="filterRows()">
+      <button type="button" class="clear-btn" onclick="clearFilter('filter-child')" title="Șterge filtru">✕</button>
+    </div>
+  </div>
+  <div class="search-filter-group">
+    <label for="filter-therapist">Filtrează terapeut:</label>
+    <div class="search-input-wrap">
+      <input type="text" id="filter-therapist" placeholder="Caută terapeut…" oninput="filterRows()">
+      <button type="button" class="clear-btn" onclick="clearFilter('filter-therapist')" title="Șterge filtru">✕</button>
+    </div>
+  </div>
+</div>
+
+{% if rows %}
+<div class="raport-wrap">
+  <table class="raport-table">
+    <thead>
+      <tr>
+        <th class="col-left">Copil</th>
+        <th class="col-left">Terapeut</th>
+        <th class="col-left">CNP</th>
+        {% for m in month_names %}<th>{{ m }}</th>{% endfor %}
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr data-child="{{ row.child|lower }}" data-therapist="{{ row.therapist|lower }}">
+        <td class="col-left">{{ row.child }}</td>
+        <td class="col-left">{{ row.therapist }}</td>
+        <td class="col-left">{{ row.cnp }}</td>
+        {% for v in row.counts %}
+          <td {% if not v %}class="zero"{% endif %}>{{ v }}</td>
+        {% endfor %}
+        <td class="total-col">{{ row.total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <p class="no-data">Nu există ședințe înregistrate pentru anul {{ year }}.</p>
+{% endif %}
+<script>
+function filterRows() {
+  var cq = document.getElementById('filter-child').value.toLowerCase().trim();
+  var tq = document.getElementById('filter-therapist').value.toLowerCase().trim();
+  document.querySelectorAll('.raport-table tbody tr').forEach(function(row) {
+    var c = row.dataset.child || '';
+    var t = row.dataset.therapist || '';
+    row.style.display = ((!cq || c.includes(cq)) && (!tq || t.includes(tq))) ? '' : 'none';
+  });
+}
+function clearFilter(id) {
+  document.getElementById(id).value = '';
+  filterRows();
+}
+</script>
+{% endblock %}

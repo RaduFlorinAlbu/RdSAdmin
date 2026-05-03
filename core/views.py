@@ -1,3 +1,4 @@
+import calendar
 import json
 from datetime import date, time, timedelta
 
@@ -157,10 +158,142 @@ def admin_site_context(request):
         "opts": {"app_label": "core"},
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Report helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+MONTHS_RO = [
+    "", "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
+    "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
+]
+
+
+def _available_years():
+    from django.db.models import Min, Max
+    agg = Therapy.objects.aggregate(mn=Min("date__year"), mx=Max("date__year"))
+    mn = agg["mn"] or date.today().year
+    mx = agg["mx"] or date.today().year
+    return list(range(mn, mx + 1))
+
+
+def _report_context(request, title):
+    from django.contrib import admin as _admin
     return {
         "has_permission": request.user.is_active and request.user.is_staff,
         "site_header": _admin.site.site_header,
         "site_title": _admin.site.site_title,
-        "title": "Editează/Adaugă orar",
+        "title": title,
         "opts": {"app_label": "core"},
     }
+
+
+@method_decorator(staff_member_required, name="dispatch")
+class RaportLunarView(View):
+    template_name = "admin/core/raport_lunar.html"
+
+    def get(self, request):
+        today = date.today()
+        year  = int(request.GET.get("an",  today.year))
+        month = int(request.GET.get("luna", today.month))
+
+        _, days_in_month = calendar.monthrange(year, month)
+        days = list(range(1, days_in_month + 1))
+
+        # Fetch all therapies for the month
+        therapies = (
+            Therapy.objects
+            .filter(date__year=year, date__month=month)
+            .select_related("child", "therapist")
+        )
+
+        # Build pivot: {(child_id, therapist_id): {day: count}}
+        pivot = {}
+        meta  = {}  # key -> (child_display, therapist_display, cnp)
+        for t in therapies:
+            key = (t.child_id, t.therapist_id)
+            if key not in pivot:
+                pivot[key] = {}
+                meta[key] = (
+                    f"{t.child.last_name} {t.child.first_name}",
+                    f"{t.therapist.last_name} {t.therapist.first_name}",
+                    t.child.cnp,
+                )
+            d = t.date.day
+            pivot[key][d] = pivot[key].get(d, 0) + 1
+
+        rows = []
+        for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+            child_name, therapist_name, cnp = meta[key]
+            counts = [pivot[key].get(d, "") for d in days]
+            total  = sum(v for v in counts if v)
+            rows.append({
+                "child":     child_name,
+                "therapist": therapist_name,
+                "cnp":       cnp,
+                "counts":    counts,
+                "total":     total,
+            })
+
+        ctx = _report_context(request, f"Raport lunar – {MONTHS_RO[month]} {year}")
+        ctx.update({
+            "year": year, "month": month,
+            "month_name": MONTHS_RO[month],
+            "days": days,
+            "rows": rows,
+            "years": _available_years(),
+            "months": list(enumerate(MONTHS_RO))[1:],  # (1,"Ianuarie")..
+        })
+        return render(request, self.template_name, ctx)
+
+
+@method_decorator(staff_member_required, name="dispatch")
+class RaportAnualView(View):
+    template_name = "admin/core/raport_anual.html"
+
+    def get(self, request):
+        today = date.today()
+        year  = int(request.GET.get("an", today.year))
+
+        therapies = (
+            Therapy.objects
+            .filter(date__year=year)
+            .select_related("child", "therapist")
+        )
+
+        pivot = {}
+        meta  = {}
+        for t in therapies:
+            key = (t.child_id, t.therapist_id)
+            if key not in pivot:
+                pivot[key] = {}
+                meta[key] = (
+                    f"{t.child.last_name} {t.child.first_name}",
+                    f"{t.therapist.last_name} {t.therapist.first_name}",
+                    t.child.cnp,
+                )
+            m = t.date.month
+            pivot[key][m] = pivot[key].get(m, 0) + 1
+
+        rows = []
+        for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+            child_name, therapist_name, cnp = meta[key]
+            counts = [pivot[key].get(m, "") for m in range(1, 13)]
+            total  = sum(v for v in counts if v)
+            rows.append({
+                "child":     child_name,
+                "therapist": therapist_name,
+                "cnp":       cnp,
+                "counts":    counts,
+                "total":     total,
+            })
+
+        ctx = _report_context(request, f"Raport anual – {year}")
+        ctx.update({
+            "year": year,
+            "month_names": MONTHS_RO[1:],  # 12 names
+            "rows": rows,
+            "years": _available_years(),
+            "months": list(enumerate(MONTHS_RO))[1:],  # (1,"Ianuarie")..
+        })
+        return render(request, self.template_name, ctx)
