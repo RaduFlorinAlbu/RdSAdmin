@@ -73,14 +73,59 @@
   /* Paginator active */
   .paginator a:focus, .paginator a:hover { background: #1ea0f7; }
   .paginator .this-page { background: #1ea0f7; }
+
+  /* Reset password button on user change form */
+  .password-reset-link,
+  .submit-row a.historylink,
+  [class*="password"] a.button,
+  #content a[href*="password"] {
+    background: #1ea0f7 !important;
+    color: #fff !important;
+    border-color: #1a6bbf !important;
+  }
+  .password-reset-link:hover,
+  .submit-row a.historylink:hover,
+  [class*="password"] a.button:hover,
+  #content a[href*="password"]:hover {
+    background: #1a6bbf !important;
+    color: #fff !important;
+  }
+  /* Target the specific reset-password link rendered by Django UserAdmin */
+  .submit-row a.button[href*="password"] {
+    background: #1ea0f7 !important;
+    color: #fff !important;
+    border-color: #1a6bbf !important;
+  }
+  .submit-row a.button[href*="password"]:hover {
+    background: #1a6bbf !important;
+  }
+  /* Acasă button in sidebar */
+  #nav-sidebar .acasa-btn {
+    display: block;
+    margin: 10px 12px 4px;
+    padding: 6px 12px;
+    background: #1ea0f7;
+    color: #fff !important;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+  }
+  #nav-sidebar .acasa-btn:hover { background: #1a6bbf; }
+  /* Hide the auto-generated app-section heading links */
+  #nav-sidebar .section { display: none; }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-  // Redirect the sidebar app-section link to the dashboard and label it "Acasă"
-  document.querySelectorAll('#nav-sidebar .section').forEach(function (a) {
-    a.textContent = 'Acasă';
-    a.href = '/admin/';
-  });
+  var sidebar = document.getElementById('nav-sidebar');
+  if (!sidebar) return;
+  // Insert a single "Acasă" button at the very top of the sidebar
+  var btn = document.createElement('a');
+  btn.href = '/admin/';
+  btn.className = 'acasa-btn';
+  btn.textContent = 'Acasă';
+  sidebar.insertBefore(btn, sidebar.firstChild);
 });
 </script>
 {% endblock %}
