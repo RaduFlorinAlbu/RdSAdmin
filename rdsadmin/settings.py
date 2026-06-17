@@ -13,6 +13,18 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost").split(",")
 
 # ---------------------------------------------------------------------------
+# Reverse proxy (Traefik) – CSRF & forwarded headers
+# ---------------------------------------------------------------------------
+# Trust the HTTPS scheme forwarded by Traefik
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
+# Allow CSRF for all origins listed in DJANGO_ALLOWED_HOSTS
+# Format in .env: CSRF_TRUSTED_ORIGINS=https://app.domeniu.ro,https://www.domeniu.ro
+_csrf_env = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_env.split(",") if o.strip()]
+
+# ---------------------------------------------------------------------------
 # Application definition
 # ---------------------------------------------------------------------------
 INSTALLED_APPS = [
@@ -27,6 +39,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # serve static files in production
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -92,6 +105,12 @@ USE_TZ = True
 # ---------------------------------------------------------------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# ---------------------------------------------------------------------------
+# Media files (uploaded documents)
+# ---------------------------------------------------------------------------
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "dynamic"
 
 # ---------------------------------------------------------------------------
 # Default primary key field type

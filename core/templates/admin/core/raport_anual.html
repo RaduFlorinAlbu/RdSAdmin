@@ -86,9 +86,9 @@
 
 <div class="raport-search-bars">
   <div class="search-filter-group">
-    <label for="filter-child">Filtrează copil:</label>
+    <label for="filter-child">Filtrează pacient:</label>
     <div class="search-input-wrap">
-      <input type="text" id="filter-child" placeholder="Caută copil…" oninput="filterRows()">
+      <input type="text" id="filter-child" placeholder="Caută pacient…" oninput="filterRows()">
       <button type="button" class="clear-btn" onclick="clearFilter('filter-child')" title="Șterge filtru">✕</button>
     </div>
   </div>
@@ -106,7 +106,7 @@
   <table class="raport-table">
     <thead>
       <tr>
-        <th class="col-left">Copil</th>
+        <th class="col-left">Pacient</th>
         <th class="col-left">Terapeut</th>
         <th class="col-left">CNP</th>
         {% for m in month_names %}<th>{{ m }}</th>{% endfor %}

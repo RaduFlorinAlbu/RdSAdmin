@@ -35,7 +35,7 @@ class Parent(models.Model):
     first_name = models.CharField("Prenume", max_length=100)
     last_name = models.CharField("Nume", max_length=100)
     email = models.EmailField("Email", blank=True, default="")
-    phone_number = models.CharField("Număr de telefon", max_length=30)
+    phone_number = models.CharField("Număr de telefon", max_length=30, blank=True, default="")
 
     class Meta:
         ordering = ["last_name", "first_name"]
@@ -43,7 +43,7 @@ class Parent(models.Model):
         verbose_name_plural = "Părinți"
 
     def __str__(self):
-        return f"{self.first_name} {self.last_name}"
+        return f"{self.last_name} {self.first_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -59,11 +59,11 @@ class Therapist(models.Model):
         verbose_name_plural = "Terapeuți"
 
     def __str__(self):
-        return f"{self.first_name} {self.last_name}"
+        return f"{self.last_name} {self.first_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Copil
+# Pacient
 # ──────────────────────────────────────────────────────────────────────────────
 class Child(models.Model):
 
@@ -114,25 +114,38 @@ class Child(models.Model):
         default=Status.ACTIV,
     )
 
-    # Un părinte poate avea mai mulți copii; fiecare copil are exact un părinte.
+    # Un părinte poate avea mai mulți copii; fiecare copil minor are exact un părinte.
+    # Pacienții majori pot fi fără părinte.
     parent = models.ForeignKey(
         Parent,
         verbose_name="Părinte",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="children",
     )
 
     class Meta:
         ordering = ["last_name", "first_name"]
-        verbose_name = "Copil"
-        verbose_name_plural = "Copii"
+        verbose_name = "Pacient"
+        verbose_name_plural = "Pacienți"
 
     def clean(self):
         if self.cnp:
-            if _compute_from_cnp(self.cnp) is None:
+            result = _compute_from_cnp(self.cnp)
+            if result is None:
                 raise ValidationError(
                     {"cnp": "CNP invalid – trebuie să conțină exact 13 cifre corecte."}
                 )
+            _, is_minor = result
+            if is_minor and not self.parent_id:
+                raise ValidationError(
+                    {"parent": "Părintele este obligatoriu pentru pacienții minori."}
+                )
+        elif self.child_type == self.ChildType.UNDERAGE and not self.parent_id:
+            raise ValidationError(
+                {"parent": "Părintele este obligatoriu pentru pacienții minori."}
+            )
 
     def save(self, *args, **kwargs):
         if self.cnp:
@@ -151,7 +164,7 @@ class Child(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.first_name} {self.last_name}"
+        return f"{self.last_name} {self.first_name}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -168,7 +181,7 @@ class Child(models.Model):
 class Therapy(models.Model):
     child = models.ForeignKey(
         Child,
-        verbose_name="Copil",
+        verbose_name="Pacient",
         on_delete=models.CASCADE,
         related_name="therapies",
     )
@@ -211,7 +224,7 @@ class Document(models.Model):
     )
     child = models.ForeignKey(
         Child,
-        verbose_name="Copil",
+        verbose_name="Pacient",
         on_delete=models.CASCADE,
         related_name="documents",
     )
@@ -235,9 +248,60 @@ class Document(models.Model):
 
     class Meta:
         ordering = ["child", "name"]
-        verbose_name = "Document"
-        verbose_name_plural = "Documente"
+        verbose_name = "Document pacient"
+        verbose_name_plural = "Documente pacienți"
+
+    def save(self, *args, **kwargs):
+        if self.creation_date:
+            self.exists = True
+        super().save(*args, **kwargs)
 
     def __str__(self):
         status = "✔" if self.exists else "✘"
         return f"{self.name} [{status}] – {self.child}"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Document eligibilitate psiholog
+# ──────────────────────────────────────────────────────────────────────────────
+def _therapist_doc_upload_path(instance, filename):
+    return f"therapist_docs/{instance.therapist_id}/{filename}"
+
+
+class TherapistDocument(models.Model):
+    therapist = models.ForeignKey(
+        Therapist,
+        verbose_name="Terapeut",
+        on_delete=models.CASCADE,
+        related_name="eligibility_documents",
+    )
+    name = models.CharField("Nume document", max_length=200)
+    has_expiry = models.BooleanField(
+        "Are dată de expirare",
+        default=False,
+    )
+    expiry_date = models.DateField(
+        "Dată expirare",
+        blank=True,
+        null=True,
+    )
+    pdf_file = models.FileField(
+        "Fișier PDF",
+        upload_to=_therapist_doc_upload_path,
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        ordering = ["therapist", "name"]
+        verbose_name = "Document eligibilitate psiholog"
+        verbose_name_plural = "Documente eligibilitate psiholog"
+
+    def clean(self):
+        if self.has_expiry and not self.expiry_date:
+            raise ValidationError(
+                {"expiry_date": "Completează data de expirare sau deselectează \u201eAre dată de expirare\u201f."}
+            )
+
+    def __str__(self):
+        return f"{self.name} – {self.therapist}"
