@@ -1,7 +1,7 @@
 import calendar
 import io
 import json
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
@@ -559,8 +559,9 @@ def raport_zilnic_excel(request):
         for cid, cnt in sorted(counts.items(), key=lambda x: names[x[0]])
     ]
     suffix = "_ore" if hours_mode else "_sedinte"
+    ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"Zilnic {selected_date}", headers, rows)
-    return _excel_response(data, f"raport_zilnic_{selected_date}{suffix}.xlsx")
+    return _excel_response(data, f"raport_zilnic_{selected_date}{suffix}_{ts}.xlsx")
 
 
 @staff_member_required
@@ -608,8 +609,9 @@ def raport_lunar_excel(request):
         rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
+    ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"{MONTHS_RO[month]} {year}", headers, rows)
-    return _excel_response(data, f"raport_lunar_{year}_{month:02d}{suffix}.xlsx")
+    return _excel_response(data, f"raport_lunar_{year}_{month:02d}{suffix}_{ts}.xlsx")
 
 
 @staff_member_required
@@ -653,8 +655,9 @@ def raport_anual_excel(request):
         rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
+    ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"Anual {year}", headers, rows)
-    return _excel_response(data, f"raport_anual_{year}{suffix}.xlsx")
+    return _excel_response(data, f"raport_anual_{year}{suffix}_{ts}.xlsx")
 
 
 @staff_member_required
@@ -703,5 +706,6 @@ def raport_saptamanal_excel(request):
         rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
+    ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"S{week} {year}", headers, rows)
-    return _excel_response(data, f"raport_saptamanal_{year}_S{week:02d}{suffix}.xlsx")
+    return _excel_response(data, f"raport_saptamanal_{year}_S{week:02d}{suffix}_{ts}.xlsx")
