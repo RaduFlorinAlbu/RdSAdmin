@@ -1,4 +1,15 @@
 {% extends "admin/base.html" %}
+{% load i18n %}
+
+{% block userlinks %}
+  {% if user.has_usable_password %}
+    <a href="{% url 'admin:password_change' %}">{% trans 'Schimbă parola' %}</a> /
+  {% endif %}
+  <form method="post" action="{% url 'admin:logout' %}" style="display:inline;margin:0;padding:0;">
+    {% csrf_token %}
+    <button type="submit" class="logout-link">{% trans 'DECONECTARE' %}</button>
+  </form>
+{% endblock %}
 
 {% block extrastyle %}
 {{ block.super }}
@@ -21,6 +32,12 @@
   #header a:link, #header a:visited { color: #fff; }
   div#user-tools a { color: #fff; border-bottom-color: rgba(255,255,255,.5); }
   div#user-tools a:hover { color: #fff; border-bottom-color: #fff; }
+  .logout-link {
+    background: none; border: none; border-bottom: 1px solid rgba(255,255,255,.5);
+    color: #fff; cursor: pointer; font-size: inherit; font-family: inherit;
+    font-weight: inherit; padding: 0; margin: 0; text-decoration: none;
+  }
+  .logout-link:hover { border-bottom-color: #fff; }
 
   /* Breadcrumbs bar */
   div.breadcrumbs {
