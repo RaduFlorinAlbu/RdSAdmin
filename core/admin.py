@@ -321,12 +321,22 @@ class RdsAdminSite(admin.AdminSite):
     index_title = "Dashboard"
 
     def get_urls(self):
-        from .views import TherapyBatchView, RaportLunarView, RaportAnualView
+        from .views import (
+            TherapyBatchView, RaportLunarView, RaportAnualView, RaportSaptamanaiView,
+            RaportZilnicView,
+            raport_lunar_excel, raport_anual_excel, raport_saptamanal_excel,
+            raport_zilnic_excel,
+        )
         custom = [
             path(
                 "core/therapy/batch/",
                 self.admin_view(TherapyBatchView.as_view()),
                 name="therapy_batch",
+            ),
+            path(
+                "core/rapoarte/zilnic/",
+                self.admin_view(RaportZilnicView.as_view()),
+                name="raport_zilnic",
             ),
             path(
                 "core/rapoarte/lunar/",
@@ -338,14 +348,41 @@ class RdsAdminSite(admin.AdminSite):
                 self.admin_view(RaportAnualView.as_view()),
                 name="raport_anual",
             ),
+            path(
+                "core/rapoarte/saptamanal/",
+                self.admin_view(RaportSaptamanaiView.as_view()),
+                name="raport_saptamanal",
+            ),
+            path(
+                "core/rapoarte/zilnic/excel/",
+                self.admin_view(raport_zilnic_excel),
+                name="raport_zilnic_excel",
+            ),
+            path(
+                "core/rapoarte/lunar/excel/",
+                self.admin_view(raport_lunar_excel),
+                name="raport_lunar_excel",
+            ),
+            path(
+                "core/rapoarte/anual/excel/",
+                self.admin_view(raport_anual_excel),
+                name="raport_anual_excel",
+            ),
+            path(
+                "core/rapoarte/saptamanal/excel/",
+                self.admin_view(raport_saptamanal_excel),
+                name="raport_saptamanal_excel",
+            ),
         ]
         return custom + super().get_urls()
 
     def each_context(self, request):
         ctx = super().each_context(request)
-        ctx["batch_therapy_url"] = "core/therapy/batch/"
+        ctx["batch_therapy_url"]  = "core/therapy/batch/"
+        ctx["raport_zilnic_url"] = "core/rapoarte/zilnic/"
         ctx["raport_lunar_url"]  = "core/rapoarte/lunar/"
         ctx["raport_anual_url"]  = "core/rapoarte/anual/"
+        ctx["raport_sapt_url"]   = "core/rapoarte/saptamanal/"
         return ctx
 
     def index(self, request, extra_context=None):

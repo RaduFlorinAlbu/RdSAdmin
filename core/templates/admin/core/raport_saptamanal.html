@@ -1,8 +1,8 @@
 {% extends "admin/base_site.html" %}
-{% load i18n %}
+{% load i18n raport_tags %}
 
-{% block title %}Raport lunar{% endblock %}
-{% block content_title %}<h1>Raport lunar — {{ month_name }} {{ year }}</h1>{% endblock %}
+{% block title %}Raport săptămânal{% endblock %}
+{% block content_title %}<h1>Raport săptămânal — S{{ week }} {{ year }} ({{ monday|date:"d.m" }}–{{ sunday|date:"d.m.Y" }})</h1>{% endblock %}
 
 {% block extrahead %}
 {{ block.super }}
@@ -43,10 +43,8 @@
   .raport-table td.total-col { font-weight: bold; background: #e8f4fd; }
   .raport-table td.zero { color: #ccc; }
 
-  .back-links { margin-bottom: 16px; display: flex; gap: 16px; }
-  .back-links a {
-    color: #318CE7; text-decoration: none; font-size: 14px;
-  }
+  .back-links { margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .back-links a { color: #318CE7; text-decoration: none; font-size: 14px; }
   .back-links a:hover { text-decoration: underline; }
 
   .btn-excel,
@@ -86,12 +84,12 @@
 <div class="back-links">
   <a href="/admin/">← Acasă</a>
   <a href="/admin/core/rapoarte/zilnic/">↕ Raport zilnic</a>
-  <a href="/admin/core/rapoarte/saptamanal/?an={{ year }}">↕ Raport săptămânal {{ year }}</a>
+  <a href="/admin/core/rapoarte/lunar/?an={{ year }}">↕ Raport lunar {{ year }}</a>
   <a href="/admin/core/rapoarte/anual/?an={{ year }}">↕ Raport anual {{ year }}</a>
-  <a href="/admin/core/rapoarte/lunar/excel/?an={{ year }}&luna={{ month }}{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}{% if filter_therapist %}&therapist={{ filter_therapist|urlencode }}{% endif %}" class="btn-excel" style="margin-right:4px;">
+  <a href="/admin/core/rapoarte/saptamanal/excel/?an={{ year }}&sapt={{ week }}{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}{% if filter_therapist %}&therapist={{ filter_therapist|urlencode }}{% endif %}" class="btn-excel" style="margin-right:4px;">
     &#x2B07; Excel terapii
   </a>
-  <a href="/admin/core/rapoarte/lunar/excel/?an={{ year }}&luna={{ month }}&ore=1{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}{% if filter_therapist %}&therapist={{ filter_therapist|urlencode }}{% endif %}" class="btn-excel">
+  <a href="/admin/core/rapoarte/saptamanal/excel/?an={{ year }}&sapt={{ week }}&ore=1{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}{% if filter_therapist %}&therapist={{ filter_therapist|urlencode }}{% endif %}" class="btn-excel">
     &#x2B07; Excel ore
   </a>
 </div>
@@ -104,10 +102,10 @@
         <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
       {% endfor %}
     </select>
-    <label for="sel-luna">Lună:</label>
-    <select id="sel-luna" name="luna">
-      {% for num, name in months %}
-        <option value="{{ num }}" {% if num == month %}selected{% endif %}>{{ name }}</option>
+    <label for="sel-sapt">Săptămâna:</label>
+    <select id="sel-sapt" name="sapt">
+      {% for w in weeks %}
+        <option value="{{ w }}" {% if w == week %}selected{% endif %}>S{{ w }}</option>
       {% endfor %}
     </select>
   </div>
@@ -142,7 +140,9 @@
         <th class="col-left">Pacient</th>
         <th class="col-left">Terapeut</th>
         <th class="col-left">CNP</th>
-        {% for d in days %}<th>{{ d }}</th>{% endfor %}
+        {% for d, name in days|zip:days_ro %}
+          <th>{{ name }}<br><small>{{ d|date:"d.m" }}</small></th>
+        {% endfor %}
         <th>Total ore</th>
       </tr>
     </thead>
@@ -162,8 +162,9 @@
   </table>
 </div>
 {% else %}
-  <p class="no-data">Nu există ședințe înregistrate pentru {{ month_name }} {{ year }}.</p>
+  <p class="no-data">Nu există ședințe înregistrate pentru săptămâna S{{ week }} {{ year }}.</p>
 {% endif %}
+
 <script>
 function buildSearchableSelect(selectEl) {
   selectEl.style.display = 'none';

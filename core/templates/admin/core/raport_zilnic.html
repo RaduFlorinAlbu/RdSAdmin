@@ -1,0 +1,115 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Raport zilnic{% endblock %}
+{% block content_title %}<h1>Raport zilnic{% if selected_date %} — {{ selected_date|date:"d.m.Y" }}{% endif %}</h1>{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  .raport-filters {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 12px; margin-bottom: 20px;
+  }
+  .raport-filters label { font-weight: bold; }
+  .raport-filters input[type="date"], .raport-filters button {
+    padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px;
+    font-size: 14px;
+  }
+  .raport-filters button {
+    background: #318CE7; color: #fff; border-color: #1a6bbf; cursor: pointer;
+  }
+  .raport-filters button:hover { background: #1a6bbf; }
+
+  .raport-wrap { overflow-x: auto; }
+  .raport-table {
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 400px;
+    white-space: nowrap;
+  }
+  .raport-table th, .raport-table td {
+    border: 1px solid #ddd;
+    padding: 6px 12px;
+    text-align: center;
+  }
+  .raport-table th {
+    background: #318CE7; color: #fff;
+  }
+  .raport-table th.col-left { text-align: left; }
+  .raport-table tbody tr:nth-child(even) { background: #f5f8ff; }
+  .raport-table tbody tr:hover { background: #ddeeff; }
+  .raport-table td.col-left { text-align: left; }
+  .raport-table td.total-col { font-weight: bold; background: #e8f4fd; }
+
+  .back-links { margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .back-links a { color: #318CE7; text-decoration: none; font-size: 14px; }
+  .back-links a:hover { text-decoration: underline; }
+
+  .btn-excel,
+  .btn-excel:link,
+  .btn-excel:visited {
+    background: #1e7e34; color: #fff;
+    padding: 5px 12px; border-radius: 4px;
+    text-decoration: none; font-size: 13px;
+    transition: background .15s;
+  }
+  .btn-excel:hover { background: #145523; color: #fff; }
+  .no-data { color: #888; padding: 20px 0; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="back-links">
+  <a href="/admin/">← Acasă</a>
+  <a href="/admin/core/rapoarte/saptamanal/">↕ Raport săptămânal</a>
+  <a href="/admin/core/rapoarte/lunar/">↕ Raport lunar</a>
+  <a href="/admin/core/rapoarte/anual/">↕ Raport anual</a>
+  {% if selected_date %}
+  <a href="/admin/core/rapoarte/zilnic/excel/?data={{ selected_date|date:"Y-m-d" }}" class="btn-excel" style="margin-right:4px;">
+    &#x2B07; Excel terapii
+  </a>
+  <a href="/admin/core/rapoarte/zilnic/excel/?data={{ selected_date|date:"Y-m-d" }}&ore=1" class="btn-excel">
+    &#x2B07; Excel ore
+  </a>
+  {% endif %}
+</div>
+
+<form method="get" class="raport-filters">
+  <label for="sel-data">Data:</label>
+  <input type="date" id="sel-data" name="data"
+         value="{{ selected_date|date:'Y-m-d' }}">
+  <button type="submit">Afișează</button>
+</form>
+
+{% if selected_date %}
+  {% if rows %}
+  <div class="raport-wrap">
+    <table class="raport-table">
+      <thead>
+        <tr>
+          <th class="col-left">Pacient</th>
+          <th>Ore terapie</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="col-left">{{ row.child }}</td>
+          <td>{{ row.hours }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="col-left total-col">Total</td>
+          <td class="total-col">{{ total_hours }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <p class="no-data">Nu există ședințe înregistrate pentru această dată.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}
