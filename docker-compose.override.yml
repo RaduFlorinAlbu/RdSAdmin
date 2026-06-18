@@ -1,0 +1,16 @@
+# Local development overrides — applied automatically by Docker Compose.
+# This file is NOT used on the production server (devops uses docker-compose.yml directly).
+
+services:
+  web:
+    ports:
+      - "8000:8000"   # expose locally so localhost:8000 works
+
+  # Disable Traefik locally — not needed for dev
+  traefik:
+    profiles:
+      - production    # only starts when: docker compose --profile production up
+
+networks:
+  proxy:
+    external: false   # create it locally instead of expecting it to already exist
