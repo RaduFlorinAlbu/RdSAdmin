@@ -12,14 +12,10 @@ from django.views import View
 
 from .models import Child, Therapist, Therapy
 
-MAX_SLOTS_PER_THERAPIST = 6
-FIRST_SLOT_START = time(8, 0)
 
-
-def _slot_start(index: int) -> time:
-    dt = timedelta(hours=FIRST_SLOT_START.hour) + timedelta(hours=index * 2)
-    total_minutes = int(dt.total_seconds() // 60)
-    return time(total_minutes // 60, total_minutes % 60)
+def _slot_hours():
+    """Even hours only from 08:00 to 20:00."""
+    return [f"{h:02d}:00" for h in range(8, 21, 2)]
 
 
 def _therapies_for_date(session_date: date) -> list:
@@ -33,8 +29,11 @@ def _therapies_for_date(session_date: date) -> list:
     for t in rows:
         tid = t.therapist_id
         if tid not in groups:
-            groups[tid] = {"therapist_id": tid, "children": []}
-        groups[tid]["children"].append(t.child_id)
+            groups[tid] = {"therapist_id": tid, "slots": []}
+        groups[tid]["slots"].append({
+            "child_id": t.child_id,
+            "start_time": t.start_time.strftime("%H:%M"),
+        })
     return list(groups.values())
 
 
@@ -53,11 +52,7 @@ class TherapyBatchView(View):
                 .order_by("last_name", "first_name")
                 .values("id", "first_name", "last_name")
             ),
-            "max_slots": MAX_SLOTS_PER_THERAPIST,
-            "slot_labels": [
-                f"{_slot_start(i).strftime('%H:%M')}–{_slot_start(i+1).strftime('%H:%M')}"
-                for i in range(MAX_SLOTS_PER_THERAPIST)
-            ],
+            "slot_hours": json.dumps(_slot_hours()),
             "today": date.today().isoformat(),
             "tomorrow": (date.today() + timedelta(days=1)).isoformat(),
         }
@@ -82,20 +77,23 @@ class TherapyBatchView(View):
             messages.error(request, "Dată invalidă.")
             return render(request, self.template_name, self._base_context(request))
 
-        # Parse tables
+        import re as _re
+        # Parse tables — new structure: tables[N][therapist], tables[N][slots][M][child|start_time]
         raw = request.POST
         tables = {}
         for key, value in raw.items():
-            if not key.startswith("tables["):
+            m = _re.match(r'tables\[(\d+)\]\[therapist\]$', key)
+            if m:
+                t_idx = m.group(1)
+                tables.setdefault(t_idx, {"therapist": None, "slots": {}})
+                tables[t_idx]["therapist"] = value
                 continue
-            parts = key.replace("]", "").replace("tables[", "").split("[")
-            table_idx = parts[0]
-            field = parts[1]
-            tables.setdefault(table_idx, {"therapist": None, "children": {}})
-            if field == "therapist":
-                tables[table_idx]["therapist"] = value
-            elif field == "children":
-                tables[table_idx]["children"][parts[2]] = value
+            m = _re.match(r'tables\[(\d+)\]\[slots\]\[(\d+)\]\[(child|start_time)\]$', key)
+            if m:
+                t_idx, s_idx, field = m.group(1), m.group(2), m.group(3)
+                tables.setdefault(t_idx, {"therapist": None, "slots": {}})
+                tables[t_idx]["slots"].setdefault(s_idx, {})
+                tables[t_idx]["slots"][s_idx][field] = value
 
         errors = []
         to_create = []
@@ -111,22 +109,30 @@ class TherapyBatchView(View):
                 errors.append(f"Tabela {int(t_idx)+1}: terapeut invalid.")
                 continue
 
-            for slot_idx_str, child_id in sorted(table["children"].items(), key=lambda x: int(x[0])):
+            for s_idx, slot in sorted(table["slots"].items(), key=lambda x: int(x[0])):
+                child_id = slot.get("child", "")
+                start_time_str = slot.get("start_time", "")
                 if not child_id:
                     continue
-                slot_idx = int(slot_idx_str)
-                if slot_idx >= MAX_SLOTS_PER_THERAPIST:
+                if not start_time_str:
+                    errors.append(f"Tabela {int(t_idx)+1}, slot {int(s_idx)+1}: oră lipsă.")
+                    continue
+                try:
+                    h, m_val = map(int, start_time_str.split(":"))
+                    start_t = time(h, m_val)
+                except (ValueError, AttributeError):
+                    errors.append(f"Tabela {int(t_idx)+1}, slot {int(s_idx)+1}: oră invalidă.")
                     continue
                 try:
                     child = Child.objects.get(pk=child_id, status="activ")
                 except Child.DoesNotExist:
-                    errors.append(f"Tabela {int(t_idx)+1}, slot {slot_idx+1}: copil invalid sau arhivat.")
+                    errors.append(f"Tabela {int(t_idx)+1}, slot {int(s_idx)+1}: pacient invalid sau arhivat.")
                     continue
                 to_create.append(Therapy(
                     child=child,
                     therapist=therapist,
                     date=session_date,
-                    start_time=_slot_start(slot_idx),
+                    start_time=start_t,
                 ))
 
         if errors:
