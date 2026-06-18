@@ -439,8 +439,9 @@ class RdsAdminSite(admin.AdminSite):
             group("persoane",   "Persoane",   ["parent", "child", "therapist"]),
             group("documente",  "Documente",  ["document", "therapistdocument"]),
             group("orar",       "Orar",       ["therapy"]),
-            group("utilizatori","Utilizatori", ["user"]),
         ]
+        if request.user.is_superuser:
+            sections.append(group("utilizatori", "Utilizatori", ["user"]))
         return [s for s in sections if s]
 
 
