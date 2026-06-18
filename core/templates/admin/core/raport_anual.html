@@ -48,6 +48,16 @@
     color: #318CE7; text-decoration: none; font-size: 14px;
   }
   .back-links a:hover { text-decoration: underline; }
+
+  .btn-excel,
+  .btn-excel:link,
+  .btn-excel:visited {
+    background: #1e7e34; color: #fff;
+    padding: 5px 12px; border-radius: 4px;
+    text-decoration: none; font-size: 13px;
+    transition: background .15s;
+  }
+  .btn-excel:hover { background: #145523; color: #fff; }
   .no-data { color: #888; padding: 20px 0; font-style: italic; }
 
   .raport-search-bars {
@@ -71,7 +81,15 @@
 {% block content %}
 <div class="back-links">
   <a href="/admin/">← Acasă</a>
+  <a href="/admin/core/rapoarte/zilnic/">↕ Raport zilnic</a>
+  <a href="/admin/core/rapoarte/saptamanal/?an={{ year }}">↕ Raport săptămânal {{ year }}</a>
   <a href="/admin/core/rapoarte/lunar/?an={{ year }}">↕ Raport lunar {{ year }}</a>
+  <a href="/admin/core/rapoarte/anual/excel/?an={{ year }}" class="btn-excel" style="margin-right:4px;">
+    &#x2B07; Excel terapii
+  </a>
+  <a href="/admin/core/rapoarte/anual/excel/?an={{ year }}&ore=1" class="btn-excel">
+    &#x2B07; Excel ore
+  </a>
 </div>
 
 <form method="get" class="raport-filters">
@@ -110,7 +128,7 @@
         <th class="col-left">Terapeut</th>
         <th class="col-left">CNP</th>
         {% for m in month_names %}<th>{{ m }}</th>{% endfor %}
-        <th>Total</th>
+        <th>Total ore</th>
       </tr>
     </thead>
     <tbody>

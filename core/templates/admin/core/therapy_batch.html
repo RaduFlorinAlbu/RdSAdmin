@@ -433,8 +433,39 @@ function hourOptions(selected) {
   }).join('');
 }
 
+function _usedHours(tIdx) {
+  return Array.from(document.querySelectorAll(`#slots-${tIdx} .hour-select`))
+    .map(s => s.value);
+}
+
+function validateHourUnique(select, tIdx) {
+  const all = Array.from(document.querySelectorAll(`#slots-${tIdx} .hour-select`));
+  const chosen = select.value;
+  const duplicates = all.filter(s => s !== select && s.value === chosen);
+  if (duplicates.length) {
+    alert(`Ora ${chosen} este deja selectată în această tabelă.`);
+    // Revert to first unused hour
+    const used = all.filter(s => s !== select).map(s => s.value);
+    const free = SLOT_HOURS.find(h => !used.includes(h));
+    select.value = free || SLOT_HOURS[0];
+  }
+}
+
 function addSlot(tIdx) {
-  addSlotWithValue(tIdx, null, _nextHour(tIdx));
+  let hour = _nextHour(tIdx);
+  const used = _usedHours(tIdx);
+  // Advance to first unused even hour
+  let attempts = 0;
+  while (used.includes(hour) && attempts < SLOT_HOURS.length) {
+    const idx = SLOT_HOURS.indexOf(hour);
+    hour = SLOT_HOURS[(idx + 1) % SLOT_HOURS.length];
+    attempts++;
+  }
+  if (used.includes(hour)) {
+    alert('Toate orele disponibile sunt deja folosite în această tabelă.');
+    return;
+  }
+  addSlotWithValue(tIdx, null, hour);
   refreshAllChildDropdowns();
 }
 
@@ -450,7 +481,8 @@ function addSlotWithValue(tIdx, childId, startTime) {
   row.id = `slot-${tIdx}-${slotIdx}`;
   row.innerHTML = `
     <select class="hour-select" name="tables[${tIdx}][slots][${slotIdx}][start_time]"
-            style="padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+            style="padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;"
+            onchange="validateHourUnique(this, ${tIdx})">
       ${hourOptions(defaultHour)}
     </select>
     <select class="child-select" name="tables[${tIdx}][slots][${slotIdx}][child]" style="display:none">
