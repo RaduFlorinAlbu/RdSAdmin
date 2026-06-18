@@ -59,7 +59,7 @@
   .no-data { color: #888; padding: 20px 0; font-style: italic; }
 
   .raport-filters { flex-direction: column; align-items: flex-start; }
-  .filter-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+  .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
   .filter-group { display: flex; flex-direction: column; gap: 4px; }
   .filter-group label { font-weight: bold; font-size: 13px; }
   .searchable-wrap { display: inline-block; position: relative; }
@@ -95,17 +95,17 @@
 </div>
 
 <form method="get" class="raport-filters">
-  <input type="hidden" name="an" id="hidden-an" value="{{ year }}">
   <div class="filter-row">
+    <label for="sel-an">An:</label>
+    <select id="sel-an" name="an">
+      {% for y in years %}
+        <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+      {% endfor %}
+    </select>
     <label for="sel-sapt">Săptămâna:</label>
-    <select id="sel-sapt" name="sapt"
-            onchange="document.getElementById('hidden-an').value=this.options[this.selectedIndex].getAttribute('data-an')">
-      {% for wy in weeks %}
-        <option value="{{ wy.week }}"
-          data-an="{{ wy.year }}"
-          {% if wy.year == year and wy.week == week %}selected{% endif %}>
-          S{{ wy.week }} {{ wy.year }}
-        </option>
+    <select id="sel-sapt" name="sapt">
+      {% for w in weeks %}
+        <option value="{{ w }}" {% if w == week %}selected{% endif %}>S{{ w }}</option>
       {% endfor %}
     </select>
   </div>

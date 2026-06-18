@@ -394,23 +394,11 @@ def _week_bounds(year, week):
     return monday, sunday
 
 
-def _available_weeks():
-    """Return list of (year, week) tuples that have therapies."""
-    from django.db.models import Min, Max
-    agg = Therapy.objects.aggregate(mn=Min("date"), mx=Max("date"))
-    if not agg["mn"]:
-        today = date.today()
-        return [(today.isocalendar().year, today.isocalendar().week)]
-    pairs = set()
-    current = agg["mn"]
-    while current <= agg["mx"]:
-        iso = current.isocalendar()
-        pairs.add((iso.year, iso.week))
-        current += timedelta(days=7)
-    today = date.today()
-    iso = today.isocalendar()
-    pairs.add((iso.year, iso.week))
-    return sorted(pairs)
+def _weeks_for_year(year):
+    """Return list of ISO week numbers (1-52 or 1-53) for the given year."""
+    # ISO week 53 exists only if Dec 28 falls in week 53
+    last_week = date(year, 12, 28).isocalendar().week
+    return list(range(1, last_week + 1))
 
 
 @method_decorator(staff_member_required, name="dispatch")
@@ -467,7 +455,7 @@ class RaportSaptamanaiView(View):
                 "total":     total,
             })
 
-        weeks = _available_weeks()
+        weeks = _weeks_for_year(year)
         ctx = _report_context(request, f"Raport săptămânal – S{week} {year}")
         ctx.update({
             "year": year, "week": week,
@@ -475,7 +463,8 @@ class RaportSaptamanaiView(View):
             "days": days,
             "days_ro": DAYS_RO,
             "rows": rows,
-            "weeks": [{"year": wy, "week": wk} for wy, wk in weeks],
+            "years": _available_years(),
+            "weeks": weeks,
             "filter_child": filter_child,
             "filter_therapist": filter_therapist,
             "children_list": children_list,
