@@ -15,8 +15,8 @@ from .models import Child, Therapist, Therapy
 
 
 def _slot_hours():
-    """Even hours only from 08:00 to 20:00."""
-    return [f"{h:02d}:00" for h in range(8, 21, 2)]
+    """All hours from 08:00 to 20:00."""
+    return [f"{h:02d}:00" for h in range(8, 21)]
 
 
 def _therapies_for_date(session_date: date) -> list:
@@ -98,54 +98,207 @@ class TherapyBatchView(View):
 
         errors = []
         to_create = []
+        table_entries_by_idx = {}  # Track entries per table index
+        therapist_by_idx = {}  # Track therapist objects for each table index
+        incomplete_tables_dict = {}  # Store incomplete table data indexed by t_idx
+        processed_indices = set()  # Track which table indices have been processed
+        
+        # Create index mapping: sort table indices to get correct display order
+        sorted_table_indices = sorted(tables.keys(), key=lambda x: int(x))
+        idx_to_display_num = {idx: i + 1 for i, idx in enumerate(sorted_table_indices)}
 
-        for t_idx, table in tables.items():
+        # First pass: validate tables and build therapist map (in sorted order)
+        for t_idx in sorted_table_indices:
+            table = tables[t_idx]
             therapist_id = table.get("therapist")
             if not therapist_id:
-                # No therapist selected — silently skip the whole table
+                # Check if the table has any slots with data
+                has_slots = any(slot.get("child") or slot.get("start_time") for slot in table["slots"].values())
+                if has_slots:
+                    errors.append(f"Tabela {idx_to_display_num[t_idx]}: terapeut neselectat.")
+                    # Save incomplete table for restoration
+                    slots_list = []
+                    for s_idx, slot in sorted(table["slots"].items(), key=lambda x: int(x[0])):
+                        child_id = slot.get("child", "")
+                        start_time_str = slot.get("start_time", "")
+                        if child_id or start_time_str:
+                            slots_list.append({"child_id": child_id, "start_time": start_time_str})
+                    incomplete_tables_dict[t_idx] = {"therapist_id": None, "slots": slots_list}
+                    processed_indices.add(t_idx)  # Mark as processed
                 continue
             try:
                 therapist = Therapist.objects.get(pk=therapist_id)
+                therapist_by_idx[t_idx] = therapist
             except Therapist.DoesNotExist:
-                errors.append(f"Tabela {int(t_idx)+1}: terapeut invalid.")
+                errors.append(f"Tabela {idx_to_display_num[t_idx]}: terapeut invalid.")
+                processed_indices.add(t_idx)  # Mark as processed
                 continue
 
+        # Second pass: validate slots and collect entries (in sorted order)
+        for t_idx in sorted_table_indices:
+            # Skip tables already processed in first pass
+            if t_idx in processed_indices:
+                continue
+            
+            table = tables[t_idx]
+            if t_idx not in therapist_by_idx:
+                # Table has no therapist - only save if it has slot data (to show errors)
+                slots_list = []
+                for s_idx, slot in sorted(table["slots"].items(), key=lambda x: int(x[0])):
+                    child_id = slot.get("child", "")
+                    start_time_str = slot.get("start_time", "")
+                    if child_id or start_time_str:
+                        slots_list.append({"child_id": child_id, "start_time": start_time_str})
+                
+                # Only save table if it has slot data (not completely empty)
+                if slots_list:
+                    incomplete_tables_dict[t_idx] = {
+                        "therapist_id": table.get("therapist"),
+                        "slots": slots_list
+                    }
+                continue
+
+            therapist = therapist_by_idx[t_idx]
+
             table_entries = []
+            table_has_errors = False
+            
             for s_idx, slot in sorted(table["slots"].items(), key=lambda x: int(x[0])):
                 child_id = slot.get("child", "")
                 start_time_str = slot.get("start_time", "")
+
+                # Check for missing child
+                if not child_id and not start_time_str:
+                    # Both empty, skip this slot silently
+                    continue
+                
+                # Calculate end time for interval display
+                end_time_str = ""
+                if start_time_str:
+                    try:
+                        h, m = map(int, start_time_str.split(":"))
+                        end_h = (h + 2) % 24
+                        end_time_str = f"{end_h:02d}:00"
+                        interval_str = f"{start_time_str}-{end_time_str}"
+                    except (ValueError, AttributeError):
+                        interval_str = start_time_str
+                else:
+                    interval_str = "necunoscut"
+
                 if not child_id:
+                    errors.append(f"Tabela {idx_to_display_num[t_idx]}, interval {interval_str}: pacient neselectat.")
+                    table_has_errors = True
                     continue
                 if not start_time_str:
-                    errors.append(f"Tabela {int(t_idx)+1}, slot {int(s_idx)+1}: oră lipsă.")
+                    errors.append(f"Tabela {idx_to_display_num[t_idx]}: oră lipsă pentru pacientul selectat.")
+                    table_has_errors = True
                     continue
+
                 try:
                     h, m_val = map(int, start_time_str.split(":"))
                     start_t = time(h, m_val)
                 except (ValueError, AttributeError):
-                    errors.append(f"Tabela {int(t_idx)+1}, slot {int(s_idx)+1}: oră invalidă.")
+                    errors.append(f"Tabela {idx_to_display_num[t_idx]}, interval {interval_str}: oră invalidă.")
+                    table_has_errors = True
                     continue
                 try:
                     child = Child.objects.get(pk=child_id, status="activ")
                 except Child.DoesNotExist:
-                    errors.append(f"Tabela {int(t_idx)+1}, slot {int(s_idx)+1}: pacient invalid sau arhivat.")
+                    errors.append(f"Tabela {idx_to_display_num[t_idx]}, interval {interval_str}: pacient invalid sau arhivat.")
+                    table_has_errors = True
                     continue
+
                 table_entries.append(Therapy(
                     child=child,
                     therapist=therapist,
                     date=session_date,
                     start_time=start_t,
                 ))
-            # Skip empty tables silently
-            to_create.extend(table_entries)
 
-        # Sort all entries by start_time before saving
-        to_create.sort(key=lambda t: t.start_time)
+            # If this table has errors, save it for restoration
+            if table_has_errors:
+                slots_list = []
+                for s_idx, slot in sorted(table["slots"].items(), key=lambda x: int(x[0])):
+                    child_id = slot.get("child", "")
+                    start_time_str = slot.get("start_time", "")
+                    if child_id or start_time_str:
+                        slots_list.append({"child_id": child_id, "start_time": start_time_str})
+                incomplete_tables_dict[t_idx] = {
+                    "therapist_id": therapist.id,
+                    "slots": slots_list
+                }
+            else:
+                # Only add entries if no errors for this table
+                table_entries_by_idx[t_idx] = (therapist, table_entries)
+                to_create.extend(table_entries)
+
+        # Third pass: check for overlapping sessions for the same therapist
+        from datetime import timedelta as td
+        therapist_slots = {}  # { therapist_id: [list of (start_time, end_time, therapy_obj)] }
+        for therapy in to_create:
+            t_id = therapy.therapist_id
+            if t_id not in therapist_slots:
+                therapist_slots[t_id] = []
+            end_time = time((therapy.start_time.hour + 2) % 24, therapy.start_time.minute)
+            therapist_slots[t_id].append((therapy.start_time, end_time, therapy))
+
+        # Check for overlaps
+        conflict_table_indices = set()  # Track which table indices have conflicts
+        for t_id, slots in therapist_slots.items():
+            for i, (start1, end1, therapy1) in enumerate(slots):
+                for start2, end2, therapy2 in slots[i+1:]:
+                    # Two sessions overlap if: start1 < end2 AND start2 < end1
+                    if start1 < end2 and start2 < end1:
+                        interval1 = f"{start1.strftime('%H:%M')}-{end1.strftime('%H:%M')}"
+                        interval2 = f"{start2.strftime('%H:%M')}-{end2.strftime('%H:%M')}"
+                        errors.append(
+                            f"Conflict de orar pentru {therapy1.therapist}: "
+                            f"intervalele {interval1} și {interval2} se suprapun."
+                        )
+                        # Mark all therapist's tables as conflicting
+                        for t_idx, (therapist_obj, entries) in table_entries_by_idx.items():
+                            if therapist_obj.id == t_id:
+                                conflict_table_indices.add(t_idx)
+
+        # If there are conflicts, save conflicting tables and clear to_create
+        if conflict_table_indices:
+            for t_idx in sorted(conflict_table_indices, key=lambda x: int(x)):
+                therapist_obj, table_entries = table_entries_by_idx[t_idx]
+                slots_list = []
+                for s_idx, slot in sorted(tables[t_idx]["slots"].items(), key=lambda x: int(x[0])):
+                    child_id = slot.get("child", "")
+                    start_time_str = slot.get("start_time", "")
+                    if child_id or start_time_str:
+                        slots_list.append({"child_id": child_id, "start_time": start_time_str})
+                incomplete_tables_dict[t_idx] = {
+                    "therapist_id": therapist_obj.id,
+                    "slots": slots_list
+                }
+            to_create = []  # Clear entries with conflicts
 
         if errors:
+            # Save good entries to DB
+            if to_create:
+                with transaction.atomic():
+                    Therapy.objects.filter(date=session_date).delete()
+                    Therapy.objects.bulk_create(to_create)
+                    messages.success(
+                        request,
+                        f"{len(to_create)} ședință(e) au fost salvate. "
+                        f"Tabelele cu erori rămân pentru remediere."
+                    )
+            
+            # Show error messages
             for e in errors:
                 messages.error(request, e)
-            return render(request, self.template_name, self._base_context(request))
+            
+            # Convert incomplete_tables_dict to sorted list
+            incomplete_tables = [incomplete_tables_dict[t_idx] for t_idx in sorted_table_indices if t_idx in incomplete_tables_dict]
+            
+            ctx = self._base_context(request)
+            ctx['incomplete_tables'] = json.dumps(incomplete_tables)
+            ctx['session_date'] = selected_date_str
+            return render(request, self.template_name, ctx)
 
         with transaction.atomic():
             # Replace: delete all sessions for this date, then bulk-insert the new ones
