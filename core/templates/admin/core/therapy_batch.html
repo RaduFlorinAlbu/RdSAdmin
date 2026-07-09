@@ -132,14 +132,14 @@
 <div id="batch-root">
   <form method="post" id="batch-form">
     {% csrf_token %}
-    <input type="hidden" name="session_date" id="session_date_hidden" value="{{ today }}">
+    <input type="hidden" name="session_date" id="session_date_hidden" value="{% if session_date %}{{ session_date }}{% else %}{{ today }}{% endif %}">
 
     {# ── Date selector ── #}
     <div class="date-bar">
       <label>Dată:</label>
       <button type="button" class="date-btn active" id="btn-today" onclick="setDate('{{ today }}', this)">Azi</button>
       <button type="button" class="date-btn" id="btn-tomorrow" onclick="setDate('{{ tomorrow }}', this)">Mâine</button>
-      <input type="date" id="session_date" value="{{ today }}"
+      <input type="date" id="session_date" value="{% if session_date %}{{ session_date }}{% else %}{{ today }}{% endif %}"
              onchange="setDate(this.value, null)">
     </div>
 
@@ -159,6 +159,7 @@
 const THERAPISTS         = {{ therapists|safe }};
 const CHILDREN           = {{ children|safe }};
 const SLOT_HOURS         = {{ slot_hours|safe }};
+const INCOMPLETE_TABLES  = {{ incomplete_tables|default:"null"|safe }};
 const MAX_CHILD_SESSIONS = 2;
 
 let tableCounter = 0;
@@ -289,6 +290,37 @@ function getChildTableMap() {
   return map;
 }
 
+function getChildSlotsByTherapist() {
+  // { childId: { therapistId: [slot_hours] } } — tracks slots per child per therapist
+  const map = {};
+  document.querySelectorAll('.child-select').forEach(sel => {
+    if (!sel.value) return;
+    const childId = sel.value;
+    const tableEl = sel.closest('.therapist-table');
+    const therapistSel = tableEl.querySelector('.therapist-select');
+    const therapistId = therapistSel ? therapistSel.value : null;
+    const hourSel = sel.closest('.slot-row').querySelector('.hour-select');
+    const hour = hourSel ? parseInt(hourSel.value.split(':')[0]) : null;
+    
+    if (!therapistId || !hour) return;
+    
+    if (!map[childId]) map[childId] = {};
+    if (!map[childId][therapistId]) map[childId][therapistId] = [];
+    map[childId][therapistId].push(hour);
+  });
+  return map;
+}
+
+function areConsecutive(hours) {
+  // Check if hours form a consecutive block (each hour is +2 from previous)
+  if (hours.length <= 1) return true;
+  const sorted = hours.sort((a, b) => a - b);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i-1] !== 2) return false;
+  }
+  return true;
+}
+
 function getChildCounts() {
   const counts = {};
   document.querySelectorAll('.child-select').forEach(sel => {
@@ -299,11 +331,17 @@ function getChildCounts() {
 
 function refreshAllChildDropdowns() {
   const childTableMap = getChildTableMap();
+  const childSlotsByTherapist = getChildSlotsByTherapist();
   const counts = getChildCounts();
   document.querySelectorAll('.child-select').forEach(sel => {
     const current = sel.value;
     const tableEl = sel.closest('.therapist-table');
     const thisTId = tableEl ? tableEl.id : '__none__';
+    const therapistSel = tableEl ? tableEl.querySelector('.therapist-select') : null;
+    const thisTherapistId = therapistSel ? therapistSel.value : null;
+    const hourSel = sel.closest('.slot-row').querySelector('.hour-select');
+    const thisHour = hourSel ? parseInt(hourSel.value.split(':')[0]) : null;
+    
     Array.from(sel.options).forEach(opt => {
       if (!opt.value) return;
       const tables = childTableMap[opt.value];
@@ -311,7 +349,19 @@ function refreshAllChildDropdowns() {
       const usedElsewhere = tables ? [...tables].some(t => t !== thisTId) : false;
       // Disable if at or over the global max (2 per day)
       const overLimit = (counts[opt.value] || 0) >= MAX_CHILD_SESSIONS;
-      opt.disabled = (usedElsewhere || overLimit) && opt.value !== current;
+      
+      // Check consecutive slots constraint
+      let notConsecutive = false;
+      if (!usedElsewhere && thisTherapistId && thisHour) {
+        const slots = childSlotsByTherapist[opt.value];
+        if (slots && slots[thisTherapistId]) {
+          // Check if adding this hour would break consecutiveness
+          const proposedHours = [...slots[thisTherapistId], thisHour];
+          notConsecutive = !areConsecutive(proposedHours);
+        }
+      }
+      
+      opt.disabled = (usedElsewhere || overLimit || notConsecutive) && opt.value !== current;
     });
     const wrapper = sel.parentElement;
     if (wrapper && wrapper._refreshDisplay) wrapper._refreshDisplay();
@@ -320,7 +370,7 @@ function refreshAllChildDropdowns() {
 
 // ── Fetch existing sessions from DB for a date ────────────────────────────────
 
-async function loadDateFromDB(dateVal) {
+async function loadDateFromDB(dateVal, callback) {
   document.getElementById('tables-container').innerHTML =
     '<p style="color:#888;padding:8px 0">Se încarcă…</p>';
 
@@ -334,10 +384,16 @@ async function loadDateFromDB(dateVal) {
 
   if (data.tables && data.tables.length > 0) {
     data.tables.forEach((t, i) => addTableWithIdx(i, t.therapist_id, t.slots || []));
+    tableCounter = data.tables.length;
   }
 
   refreshAllTherapistDropdowns();
   refreshAllChildDropdowns();
+  
+  // Call callback if provided
+  if (callback && typeof callback === 'function') {
+    callback();
+  }
 }
 
 // ── Date ─────────────────────────────────────────────────────────────────────
@@ -526,7 +582,21 @@ function removeTable(tIdx) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadDateFromDB('{{ today }}');
+  // Always load existing sessions from DB
+  loadDateFromDB('{{ today }}', () => {
+    // After loading from DB, add any incomplete tables from a failed save
+    if (INCOMPLETE_TABLES && INCOMPLETE_TABLES.length > 0) {
+      INCOMPLETE_TABLES.forEach((table, idx) => {
+        // Only add table if it has slots with data
+        if (table.slots && table.slots.length > 0) {
+          addTableWithIdx(tableCounter, table.therapist_id, table.slots);
+          tableCounter++;
+        }
+      });
+      refreshAllTherapistDropdowns();
+      refreshAllChildDropdowns();
+    }
+  });
 });
 </script>
 {% endblock %}
