@@ -101,7 +101,7 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
     )
     
     # Fetch all therapies for this date
-    therapies = Therapy.objects.filter(date=selected_date).select_related('therapist', 'child', 'therapist__centru')
+    therapies = Therapy.objects.filter(date=selected_date).select_related('therapist', 'child', 'therapist__centru', 'centru')
     
     # Group by therapist
     therapies_by_therapist = {}
@@ -114,11 +114,13 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
             }
         therapies_by_therapist[t.id]['therapies'].append(therapy)
     
-    # Group by centre
+    # Group by centre — use snapshotted centru from therapy, fall back to therapist.centru
     centres = {}
     for t_id, data in therapies_by_therapist.items():
         therapist = data['therapist']
-        centre = therapist.centru  # Keep None separate - don't fallback
+        # Use centru snapshot from any therapy of this therapist (they all have same centru for a given save)
+        first_therapy = data['therapies'][0]
+        centre = first_therapy.centru if first_therapy.centru_id else therapist.centru
         
         if centre not in centres:
             centres[centre] = []

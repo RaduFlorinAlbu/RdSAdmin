@@ -213,6 +213,14 @@ class Therapy(models.Model):
         on_delete=models.CASCADE,
         related_name="therapies",
     )
+    centru = models.ForeignKey(
+        "Centru",
+        verbose_name="Centru (snapshot)",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="therapies",
+    )
     date = models.DateField("Dată")
     start_time = models.TimeField("Oră start")
 
@@ -227,6 +235,15 @@ class Therapy(models.Model):
                 name="unique_therapist_slot",
             ),
         ]
+
+    def save(self, *args, **kwargs):
+        # Snapshot centru from therapist at save time if not already set
+        if self.centru_id is None and self.therapist_id:
+            try:
+                self.centru = Therapist.objects.select_related("centru").get(pk=self.therapist_id).centru
+            except Therapist.DoesNotExist:
+                pass
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return (

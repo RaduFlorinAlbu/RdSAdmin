@@ -216,6 +216,7 @@ class TherapyBatchView(View):
                 table_entries.append(Therapy(
                     child=child,
                     therapist=therapist,
+                    centru=therapist.centru,
                     date=session_date,
                     start_time=start_t,
                 ))
