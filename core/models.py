@@ -47,11 +47,33 @@ class Parent(models.Model):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Centru
+# ──────────────────────────────────────────────────────────────────────────────
+class Centru(models.Model):
+    name = models.CharField("Nume", max_length=200, unique=True)
+
+    class Meta:
+        verbose_name = "Centru"
+        verbose_name_plural = "Centre"
+
+    def __str__(self):
+        return self.name
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Terapeut
 # ──────────────────────────────────────────────────────────────────────────────
 class Therapist(models.Model):
     first_name = models.CharField("Prenume", max_length=100)
     last_name = models.CharField("Nume", max_length=100)
+    centru = models.ForeignKey(
+        Centru,
+        verbose_name="Centru",
+        on_delete=models.PROTECT,
+        related_name="therapists",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         ordering = ["last_name", "first_name"]

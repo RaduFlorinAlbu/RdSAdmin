@@ -83,6 +83,14 @@
   }
   .submit-btn:hover { background: #1a6bbf; }
 
+  .pdf-btn {
+    padding: 10px 28px; background: #28a745; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 15px;
+    margin-left: 10px;
+  }
+  .pdf-btn:hover { background: #1e7e34; }
+  .pdf-btn:disabled { background: #aaa; cursor: not-allowed; }
+
   /* ── Searchable select ── */
   .searchable-select {
     position: relative;
@@ -150,6 +158,7 @@
 
     <div class="submit-bar">
       <button type="submit" class="submit-btn">Salvează toate ședințele</button>
+      <button type="button" class="pdf-btn" onclick="downloadPDF()" id="pdf-btn">Descarcă PDF orar</button>
     </div>
   </form>
 </div>
@@ -161,6 +170,20 @@ const CHILDREN           = {{ children|safe }};
 const SLOT_HOURS         = {{ slot_hours|safe }};
 const INCOMPLETE_TABLES  = {{ incomplete_tables|default:"null"|safe }};
 const MAX_CHILD_SESSIONS = 2;
+
+// Sort therapists and children case-insensitively (Ana, amalia, Bianca, bogdan)
+// Using localeCompare with normalization for diacritics
+THERAPISTS.sort((a, b) => {
+  const aName = `${a.last_name} ${a.first_name}`.normalize('NFD').toLowerCase();
+  const bName = `${b.last_name} ${b.first_name}`.normalize('NFD').toLowerCase();
+  return aName.localeCompare(bName, 'ro', { sensitivity: 'base' });
+});
+
+CHILDREN.sort((a, b) => {
+  const aName = `${a.last_name} ${a.first_name}`.normalize('NFD').toLowerCase();
+  const bName = `${b.last_name} ${b.first_name}`.normalize('NFD').toLowerCase();
+  return aName.localeCompare(bName, 'ro', { sensitivity: 'base' });
+});
 
 let tableCounter = 0;
 
@@ -206,26 +229,41 @@ function buildSearchableSelect(selectEl, type) {
   function renderDropdown(filter) {
     dropdown.innerHTML = '';
     const filterLow = (filter || '').toLowerCase().trim();
-    Array.from(selectEl.options).forEach(opt => {
-      if (!opt.value) return;
-      if (filterLow && !opt.text.toLowerCase().includes(filterLow)) return;
-      const item = document.createElement('div');
-      item.className = 'dropdown-option' +
-        (opt.disabled ? ' disabled-option' : '') +
-        (opt.value === selectEl.value ? ' selected-option' : '');
-      item.textContent = opt.text;
-      if (!opt.disabled) {
-        item.addEventListener('mousedown', e => {
+    
+    // Use sorted THERAPISTS or CHILDREN arrays instead of selectEl.options
+    const dataSource = type === 'therapist' ? THERAPISTS : CHILDREN;
+    
+    dataSource.forEach(item => {
+      const itemText = `${item.last_name} ${item.first_name}`;
+      const itemValue = item.id.toString();
+      
+      // Check if item matches filter
+      if (filterLow && !itemText.toLowerCase().includes(filterLow)) return;
+      
+      // Check if item is disabled (already selected elsewhere)
+      const opt = Array.from(selectEl.options).find(o => o.value === itemValue);
+      const isDisabled = opt && opt.disabled;
+      const isSelected = selectEl.value === itemValue;
+      
+      const item_el = document.createElement('div');
+      item_el.className = 'dropdown-option' +
+        (isDisabled ? ' disabled-option' : '') +
+        (isSelected ? ' selected-option' : '');
+      item_el.textContent = itemText;
+      
+      if (!isDisabled) {
+        item_el.addEventListener('mousedown', e => {
           e.preventDefault();
-          selectEl.value = opt.value;
+          selectEl.value = itemValue;
           syncInputText();
           dropdown.style.display = 'none';
           if (type === 'therapist') refreshAllTherapistDropdowns();
           else refreshAllChildDropdowns();
         });
       }
-      dropdown.appendChild(item);
+      dropdown.appendChild(item_el);
     });
+    
     if (dropdown.children.length) {
       positionDropdown();
       dropdown.style.display = 'block';
@@ -383,7 +421,21 @@ async function loadDateFromDB(dateVal, callback) {
   document.getElementById('tables-container').innerHTML = '';
 
   if (data.tables && data.tables.length > 0) {
-    data.tables.forEach((t, i) => addTableWithIdx(i, t.therapist_id, t.slots || []));
+    // Sort tables by therapist name (case-insensitive)
+    const sortedTables = [...data.tables].sort((a, b) => {
+      const therapistA = THERAPISTS.find(t => t.id === a.therapist_id);
+      const therapistB = THERAPISTS.find(t => t.id === b.therapist_id);
+      
+      if (!therapistA) return 1;  // Unsorted/missing therapist goes last
+      if (!therapistB) return -1;
+      
+      const aName = `${therapistA.last_name} ${therapistA.first_name}`.toLowerCase();
+      const bName = `${therapistB.last_name} ${therapistB.first_name}`.toLowerCase();
+      
+      return aName.localeCompare(bName, 'ro', { sensitivity: 'base' });
+    });
+    
+    sortedTables.forEach((t, i) => addTableWithIdx(i, t.therapist_id, t.slots || []));
     tableCounter = data.tables.length;
   }
 
@@ -577,6 +629,48 @@ function removeTable(tIdx) {
   if (el) el.remove();
   refreshAllTherapistDropdowns();
   refreshAllChildDropdowns();
+}
+
+// ── PDF download ────────────────────────────────────────────────────────────
+
+function downloadPDF() {
+  const dateVal = document.getElementById('session_date_hidden').value;
+  if (!dateVal) {
+    alert('Selectează o dată!');
+    return;
+  }
+  
+  // First, submit the form to save any changes
+  const form = document.getElementById('batch-form');
+  
+  // Create a hidden submit button and trigger submit
+  const submitBtn = form.querySelector('.submit-btn');
+  
+  // Show loading state
+  const pdfBtn = document.getElementById('pdf-btn');
+  const originalText = pdfBtn.textContent;
+  pdfBtn.disabled = true;
+  pdfBtn.textContent = 'Se salvează...';
+  
+  // Submit form via AJAX to avoid page reload
+  const formData = new FormData(form);
+  
+  fetch(form.action || '', {
+    method: 'POST',
+    body: formData,
+  })
+  .then(response => {
+    // After save, download PDF
+    const url = `/therapy-schedule/pdf/?date=${encodeURIComponent(dateVal)}`;
+    window.open(url, '_blank');
+  })
+  .catch(err => {
+    alert('Eroare la salvare: ' + err);
+  })
+  .finally(() => {
+    pdfBtn.disabled = false;
+    pdfBtn.textContent = originalText;
+  });
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
