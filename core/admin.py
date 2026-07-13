@@ -9,7 +9,7 @@ from django.urls import path
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
-from .models import Child, Document, Parent, Therapist, Therapy, TherapistDocument
+from .models import Centru, Child, Document, Parent, Therapist, Therapy, TherapistDocument
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -437,8 +437,8 @@ class RdsAdminSite(admin.AdminSite):
 
         sections = [
             group("persoane",   "Persoane",   ["parent", "child", "therapist"]),
+            group("auxiliare",  "Auxiliare",  ["centru", "therapy"]),
             group("documente",  "Documente",  ["document", "therapistdocument"]),
-            group("orar",       "Orar",       ["therapy"]),
         ]
         if request.user.is_superuser:
             sections.append(group("utilizatori", "Utilizatori", ["user"]))
@@ -646,9 +646,11 @@ class ChildAdmin(StaffFullAccessMixin, admin.ModelAdmin):
 
 @admin.register(Therapist, site=admin_site)
 class TherapistAdmin(StaffFullAccessMixin, admin.ModelAdmin):
-    list_display = ("last_name", "first_name", "_terapii_luna_curenta", "_terapii_luna_anterioara", "_terapii_an_curent")
-    search_fields = ("last_name", "first_name")
+    list_display = ("last_name", "first_name", "centru", "_terapii_luna_curenta", "_terapii_luna_anterioara", "_terapii_an_curent")
+    search_fields = ("last_name", "first_name", "centru__name")
+    list_filter = ("centru",)
     inlines = [TherapistDocumentInline]
+    fields = ("first_name", "last_name", "centru")
 
     @admin.display(description="Terapii luna curentă")
     def _terapii_luna_curenta(self, obj):
@@ -664,6 +666,16 @@ class TherapistAdmin(StaffFullAccessMixin, admin.ModelAdmin):
     @admin.display(description="Terapii an curent")
     def _terapii_an_curent(self, obj):
         return obj.therapies.filter(date__year=date.today().year).count()
+
+
+@admin.register(Centru, site=admin_site)
+class CentruAdmin(StaffFullAccessMixin, admin.ModelAdmin):
+    list_display = ("name", "_therapists_count")
+    search_fields = ("name",)
+    
+    @admin.display(description="Terapeuți")
+    def _therapists_count(self, obj):
+        return obj.therapists.count()
 
 
 @admin.register(Therapy, site=admin_site)

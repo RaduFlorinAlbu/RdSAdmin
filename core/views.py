@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db import transaction
+from django.db.models.functions import Lower
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.decorators import method_decorator
@@ -46,11 +47,11 @@ class TherapyBatchView(View):
         return {
             **admin_site_context(request),
             "therapists": list(
-                Therapist.objects.order_by("last_name", "first_name").values("id", "first_name", "last_name")
+                Therapist.objects.order_by(Lower("last_name"), Lower("first_name")).values("id", "first_name", "last_name")
             ),
             "children": list(
                 Child.objects.filter(status="activ")
-                .order_by("last_name", "first_name")
+                .order_by(Lower("last_name"), Lower("first_name"))
                 .values("id", "first_name", "last_name")
             ),
             "slot_hours": json.dumps(_slot_hours()),
@@ -344,7 +345,7 @@ class RaportZilnicView(View):
 
         rows = [
             {"child": names[cid], "sessions": cnt, "hours": cnt * 2}
-            for cid, cnt in sorted(counts.items(), key=lambda x: names[x[0]])
+            for cid, cnt in sorted(counts.items(), key=lambda x: names[x[0]].lower())
         ]
 
         ctx = _report_context(request, f"Raport zilnic – {selected_date.strftime('%d.%m.%Y')}")
@@ -433,11 +434,11 @@ class RaportLunarView(View):
 
         filter_child     = request.GET.get("child", "").strip()
         filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()})
-        therapists_list  = sorted({v[1] for v in meta.values()})
+        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
+        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
             child_name, therapist_name, cnp = meta[key]
             if filter_child and child_name != filter_child:
                 continue
@@ -496,14 +497,13 @@ class RaportAnualView(View):
                 )
             m = t.date.month
             pivot[key][m] = pivot[key].get(m, 0) + 1
-
         filter_child     = request.GET.get("child", "").strip()
         filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()})
-        therapists_list  = sorted({v[1] for v in meta.values()})
+        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
+        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
             child_name, therapist_name, cnp = meta[key]
             if filter_child and child_name != filter_child:
                 continue
@@ -588,11 +588,11 @@ class RaportSaptamanaiView(View):
 
         filter_child     = request.GET.get("child", "").strip()
         filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()})
-        therapists_list  = sorted({v[1] for v in meta.values()})
+        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
+        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
             child_name, therapist_name, cnp = meta[key]
             if filter_child and child_name != filter_child:
                 continue
@@ -709,7 +709,7 @@ def raport_zilnic_excel(request):
     headers = ["Pacient", label]
     rows = [
         [names[cid], (cnt * 2 if hours_mode else cnt)]
-        for cid, cnt in sorted(counts.items(), key=lambda x: names[x[0]])
+        for cid, cnt in sorted(counts.items(), key=lambda x: names[x[0]].lower())
     ]
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
@@ -751,7 +751,7 @@ def raport_lunar_excel(request):
     label = "Ore" if hours_mode else "Şedințe"
     headers = ["Pacient", "Terapeut", "CNP"] + [str(d) for d in days] + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
         child_name, therapist_name, cnp = meta[key]
         if filter_child and child_name != filter_child:
             continue
@@ -797,7 +797,7 @@ def raport_anual_excel(request):
     label = "Ore" if hours_mode else "Şedințe"
     headers = ["Pacient", "Terapeut", "CNP"] + MONTHS_RO[1:] + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
         child_name, therapist_name, cnp = meta[key]
         if filter_child and child_name != filter_child:
             continue
@@ -848,7 +848,7 @@ def raport_saptamanal_excel(request):
     day_labels = [f"{DAYS_RO[d.weekday()]} {d.strftime('%d.%m')}" for d in days]
     headers = ["Pacient", "Terapeut", "CNP"] + day_labels + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0], meta[k][1])):
+    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
         child_name, therapist_name, cnp = meta[key]
         if filter_child and child_name != filter_child:
             continue
@@ -862,3 +862,26 @@ def raport_saptamanal_excel(request):
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"S{week} {year}", headers, rows)
     return _excel_response(data, f"raport_saptamanal_{year}_S{week:02d}{suffix}_{ts}.xlsx")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PDF export for therapy schedule
+# ──────────────────────────────────────────────────────────────────────────────
+@staff_member_required
+def therapy_schedule_pdf(request):
+    """Generate PDF with therapy schedule for a given date."""
+    selected_date_str = request.GET.get("date", "")
+    try:
+        selected_date = date.fromisoformat(selected_date_str)
+    except (ValueError, TypeError):
+        messages.error(request, "Dată invalidă.")
+        return redirect("admin:core_therapy_changelist")
+    
+    from core.pdf import generate_therapy_pdf
+    
+    pdf_data = generate_therapy_pdf(selected_date)
+    
+    response = HttpResponse(pdf_data, content_type='application/pdf')
+    date_str = selected_date.strftime('%d_%m_%Y')
+    response['Content-Disposition'] = f'attachment; filename="orar_terapii_{date_str}.pdf"'
+    return response
