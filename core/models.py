@@ -239,6 +239,9 @@ class Therapy(models.Model):
 # Document
 # ──────────────────────────────────────────────────────────────────────────────
 class Document(models.Model):
+    FISA_INITIALA  = "Fișă de evaluare inițială"
+    FISA_PERIODICA = "Fișă de evaluare periodică"
+
     name = models.CharField(
         "Nume document",
         max_length=200,
@@ -254,6 +257,10 @@ class Document(models.Model):
         "Există",
         default=False,
         help_text="A fost furnizat acest document?",
+    )
+    has_expiry = models.BooleanField(
+        "Are dată de expirare",
+        default=True,
     )
     creation_date = models.DateField(
         "Dată creare",
@@ -273,10 +280,23 @@ class Document(models.Model):
         verbose_name = "Document pacient"
         verbose_name_plural = "Documente pacienți"
 
+    def clean(self):
+        if self.has_expiry and not self.expiry_date:
+            raise ValidationError(
+                {"expiry_date": "Completează data de expirare sau deselectează „Are dată de expirare‟."}
+            )
+
     def save(self, *args, **kwargs):
         if self.creation_date:
             self.exists = True
         super().save(*args, **kwargs)
+        # When a "Fișă de evaluare periodică" is saved, mark all "inițială" docs
+        # for this patient as has_expiry=False so they stop appearing in warnings.
+        if self.name == self.FISA_PERIODICA and self.child_id:
+            Document.objects.filter(
+                child_id=self.child_id,
+                name=self.FISA_INITIALA,
+            ).update(has_expiry=False)
 
     def __str__(self):
         status = "✔" if self.exists else "✘"

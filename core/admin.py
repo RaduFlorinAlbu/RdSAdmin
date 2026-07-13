@@ -75,35 +75,45 @@ class ExpiryDateWidget(AdminDateWidget):
 # Document name widget — dropdown with two presets + free-text fallback
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PREDEFINED_NAMES = ["Certificat de naștere", "Scrisoare Medicală"]
+_PREDEFINED_NAMES = [
+    "Certificat de naștere",
+    "Scrisoare Medicală",
+    "Fișă de evaluare inițială",
+    "Fișă de evaluare periodică",
+]
 _CUSTOM_SENTINEL  = "__custom__"
 
 _DOC_NAME_SCRIPT = (
     '<script>'
     'if(!window._docNameDefined){'
     'window._docNameDefined=true;'
-    # sel = the <select>; finds text input as sibling inside same <div> — no ID dependency
     'window.docNameChange=function(sel){'
     'var CERT="Certificat de na\u0219tere";'
+    'var NO_EXPIRY_DOCS=[CERT];'
     'var CUSTOM="__custom__";'
     'var div=sel.parentElement;'
     'var textEl=div?div.querySelector("input[type=\'text\']"):null;'
     'if(!textEl)return;'
     'textEl.style.display=sel.value===CUSTOM?"":"none";'
     'if(sel.value===CUSTOM)textEl.focus();'
-    # locate expiry input in same <tr> (inline) or standalone form
+    # locate has_expiry checkbox and expiry input in same <tr> (inline) or form
     'var tr=sel.closest("tr");'
+    'var cb=tr?tr.querySelector("input[name$=\'has_expiry\']")'
+    ':document.querySelector("input[name$=\'has_expiry\']");'
     'var exp=tr?tr.querySelector("input[name$=\'expiry_date\']")'
     ':document.querySelector("input[name$=\'expiry_date\']");'
+    'var noExpiry=NO_EXPIRY_DOCS.indexOf(sel.value)!==-1;'
+    'if(cb){'
+    'cb.checked=!noExpiry;'
+    'if(typeof expiryToggle==="function")expiryToggle(cb);}'
     'if(exp){'
-    'var isCert=sel.value===CERT;'
-    'exp.disabled=isCert;'
-    'exp.style.opacity=isCert?"0.4":"";'
-    'if(isCert)exp.value="";'
+    'exp.disabled=noExpiry;'
+    'exp.style.opacity=noExpiry?"0.4":"";'
+    'if(noExpiry)exp.value="";'
     'var cont=exp.parentElement;'
     'while(cont&&!cont.querySelector("button"))cont=cont.parentElement;'
     'if(cont)cont.querySelectorAll("button").forEach(function(b){'
-    'b.disabled=isCert;b.style.opacity=isCert?"0.4":"";});'
+    'b.disabled=noExpiry;b.style.opacity=noExpiry?"0.4":"";});'
     '}}'
     '}'
     '</script>'
@@ -160,12 +170,55 @@ class DocumentNameWidget(forms.Widget):
         return choice
 
 
+_HAS_EXPIRY_SCRIPT = (
+    '<script>'
+    'if(!window._hasExpiryDefined){'
+    'window._hasExpiryDefined=true;'
+    'window.expiryToggle=function(cb){'
+    'var tr=cb.closest("tr");'
+    'if(tr){'
+    'tr.querySelectorAll("td.field-expiry_date,td.field-_expirat").forEach(function(td){'
+    'td.style.opacity=cb.checked?"":"0";'
+    'td.style.pointerEvents=cb.checked?"":"none";'
+    '});return;}'
+    'var cont=cb.closest(".inline-related")||cb.closest("fieldset")||cb.closest("form");'
+    'if(cont){'
+    'var expInp=cont.querySelector("input[name$=\'expiry_date\']");'
+    'if(expInp){'
+    'var row=expInp.closest(".form-row")||expInp.closest("p");'
+    'if(row)row.style.display=cb.checked?"":"none";}}'
+    '};'
+    'document.addEventListener("DOMContentLoaded",function(){'
+    'document.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
+    'expiryToggle(cb);});});'
+    'document.addEventListener("formset:added",function(e){'
+    'var row=e.detail&&e.detail.row;'
+    'if(!row)return;'
+    'row.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
+    'expiryToggle(cb);});});'
+    '}'
+    '</script>'
+)
+
+
+class HasExpiryWidget(forms.CheckboxInput):
+    """Standard checkbox that injects the expiryToggle script and onchange handler."""
+
+    def render(self, name, value, attrs=None, renderer=None):
+        if attrs is None:
+            attrs = {}
+        attrs['onchange'] = 'expiryToggle(this)'
+        base = super().render(name, value, attrs, renderer)
+        return mark_safe(_HAS_EXPIRY_SCRIPT + base)
+
+
 class DocumentForm(forms.ModelForm):
     class Meta:
         model = Document
         fields = '__all__'
         widgets = {
             'name': DocumentNameWidget(),
+            'has_expiry': HasExpiryWidget(),
             'expiry_date': ExpiryDateWidget(),
         }
 
@@ -236,53 +289,6 @@ class TherapistDocNameWidget(forms.Widget):
         if choice == _CUSTOM_SENTINEL:
             return data.get(f'{name}_custom', '').strip()
         return choice
-
-
-_HAS_EXPIRY_SCRIPT = (
-    '<script>'
-    'if(!window._hasExpiryDefined){'
-    'window._hasExpiryDefined=true;'
-    'window.expiryToggle=function(cb){'
-    # TabularInline: use opacity (not visibility/display) so columns stay aligned
-    # and the cell background matches the row stripe (no white border artifact)
-    'var tr=cb.closest("tr");'
-    'if(tr){'
-    'tr.querySelectorAll("td.field-expiry_date,td.field-_expirat").forEach(function(td){'
-    'td.style.opacity=cb.checked?"":"0";'
-    'td.style.pointerEvents=cb.checked?"":"none";'
-    '});return;}'
-    # Standalone form: hide/show the .form-row with expiry_date
-    'var cont=cb.closest(".inline-related")||cb.closest("fieldset")||cb.closest("form");'
-    'if(cont){'
-    'var expInp=cont.querySelector("input[name$=\'expiry_date\']");'
-    'if(expInp){'
-    'var row=expInp.closest(".form-row")||expInp.closest("p");'
-    'if(row)row.style.display=cb.checked?"":"none";}}'
-    '};'
-    # Init existing rows on page load
-    'document.addEventListener("DOMContentLoaded",function(){'
-    'document.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
-    'expiryToggle(cb);});});'
-    # Init new inline rows
-    'document.addEventListener("formset:added",function(e){'
-    'var row=e.detail&&e.detail.row;'
-    'if(!row)return;'
-    'row.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
-    'expiryToggle(cb);});});'
-    '}'
-    '</script>'
-)
-
-
-class HasExpiryWidget(forms.CheckboxInput):
-    """Standard checkbox that injects the expiryToggle script and onchange handler."""
-
-    def render(self, name, value, attrs=None, renderer=None):
-        if attrs is None:
-            attrs = {}
-        attrs['onchange'] = 'expiryToggle(this)'
-        base = super().render(name, value, attrs, renderer)
-        return mark_safe(_HAS_EXPIRY_SCRIPT + base)
 
 
 class TherapistDocumentForm(forms.ModelForm):
@@ -395,7 +401,7 @@ class RdsAdminSite(admin.AdminSite):
         from django.contrib import messages as dj_messages
         today = date.today()
         # Expired patient documents
-        expired_docs = Document.objects.filter(expiry_date__lt=today, exists=True)
+        expired_docs = Document.objects.filter(has_expiry=True, expiry_date__lt=today, exists=True)
         count = expired_docs.count()
         if count:
             names = ", ".join(
@@ -516,12 +522,12 @@ class DocumentInline(admin.TabularInline):
     model = Document
     form = DocumentForm
     extra = 1
-    fields = ("name", "exists", "creation_date", "expiry_date", "_expirat")
+    fields = ("name", "exists", "creation_date", "has_expiry", "expiry_date", "_expirat")
     readonly_fields = ("_expirat",)
 
     @admin.display(description="Expirat")
     def _expirat(self, obj):
-        if not obj.expiry_date:
+        if not obj.has_expiry or not obj.expiry_date:
             return "—"
         if obj.expiry_date < date.today():
             return format_html('<span style="color:#ba2121;font-weight:bold">Da</span>')
@@ -701,14 +707,14 @@ class TherapyAdmin(StaffFullAccessMixin, admin.ModelAdmin):
 @admin.register(Document, site=admin_site)
 class DocumentAdmin(StaffFullAccessMixin, admin.ModelAdmin):
     form = DocumentForm
-    list_display = ("name", "child", "exists", "creation_date", "expiry_date", "_expirat")
-    list_filter = ("exists", ExpiratFilter)
+    list_display = ("name", "child", "exists", "creation_date", "has_expiry", "expiry_date", "_expirat")
+    list_filter = ("exists", "has_expiry", ExpiratFilter)
     search_fields = ("name", "child__first_name", "child__last_name")
     autocomplete_fields = ("child",)
 
     @admin.display(description="Expirat")
     def _expirat(self, obj):
-        if not obj.expiry_date:
+        if not obj.has_expiry or not obj.expiry_date:
             return "—"
         if obj.expiry_date < date.today():
             return format_html('<span style="color:#ba2121;font-weight:bold">Da</span>')
