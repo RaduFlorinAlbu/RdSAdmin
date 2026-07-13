@@ -12,7 +12,7 @@ from django.shortcuts import redirect, render
 from django.utils.decorators import method_decorator
 from django.views import View
 
-from .models import Child, Therapist, Therapy
+from .models import Child, Therapist, Therapy, Pret
 
 
 def _slot_hours():
@@ -887,6 +887,276 @@ def raport_saptamanal_excel(request):
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"S{week} {year}", headers, rows)
     return _excel_response(data, f"raport_saptamanal_{year}_S{week:02d}{suffix}_{ts}.xlsx")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Raport zilnic per terapeut (detaliat cu CNP și tarif)
+# ──────────────────────────────────────────────────────────────────────────────
+@method_decorator(staff_member_required, name="dispatch")
+class RaportZilnicTerapeutView(View):
+    template_name = "admin/core/raport_zilnic_terapeut.html"
+
+    def get(self, request):
+        today = date.today()
+        year = int(request.GET.get("year", today.year))
+        month = int(request.GET.get("month", today.month))
+        therapist_id_str = request.GET.get("terapeut_id", "")
+        
+        try:
+            therapist_id = int(therapist_id_str) if therapist_id_str else None
+        except (ValueError, TypeError):
+            therapist_id = None
+        
+        therapists = Therapist.objects.all().order_by(Lower("last_name"), Lower("first_name"))
+        
+        selected_therapist = None
+        rows = []
+        total_hours = 0
+        total_amount = 0
+        
+        if therapist_id:
+            try:
+                selected_therapist = Therapist.objects.get(pk=therapist_id)
+            except Therapist.DoesNotExist:
+                selected_therapist = None
+        
+        if selected_therapist:
+            # Fetch all therapies for this therapist during the selected month
+            therapies = (
+                Therapy.objects
+                .filter(therapist_id=therapist_id, date__year=year, date__month=month)
+                .select_related("child")
+                .order_by("child__last_name", "child__first_name")
+            )
+            
+            # Group by child to count sessions
+            child_counts = {}
+            child_names = {}
+            child_cnps = {}
+            for therapy in therapies:
+                cid = therapy.child_id
+                child_counts[cid] = child_counts.get(cid, 0) + 1
+                child_names[cid] = f"{therapy.child.first_name} {therapy.child.last_name}"
+                child_cnps[cid] = therapy.child.cnp
+            
+            # Get standard therapy rate
+            try:
+                pret_rate = Pret.objects.get(name="Taxa terapie standard")
+                rate_value = int(pret_rate.valoare)
+            except Pret.DoesNotExist:
+                rate_value = 135
+            
+            # Build rows
+            for idx, (cid, cnt) in enumerate(sorted(child_counts.items(), key=lambda x: child_names[x[0]].lower()), 1):
+                hours = cnt * 2
+                amount = hours * rate_value
+                rows.append({
+                    "nr_crt": idx,
+                    "cnp": child_cnps[cid],
+                    "hours": hours,
+                    "rate": rate_value,
+                    "amount": amount,
+                })
+                total_hours += hours
+                total_amount += amount
+        
+        month_name = MONTHS_RO[month]
+        ctx = _report_context(
+            request, 
+            f"Raport terapeut – {month_name} {year}"
+        )
+        ctx.update({
+            "year": year,
+            "month": month,
+            "month_name": month_name,
+            "therapists": therapists,
+            "selected_therapist": selected_therapist,
+            "selected_therapist_id": therapist_id,
+            "rows": rows,
+            "total_hours": total_hours,
+            "total_amount": total_amount,
+            "available_years": _available_years(),
+        })
+        return render(request, self.template_name, ctx)
+
+
+@staff_member_required
+def raport_terapeut_excel(request):
+    """Generate Excel for raport terapeut (monthly) with full headers."""
+    year_str = request.GET.get("year", str(date.today().year))
+    month_str = request.GET.get("month", str(date.today().month))
+    therapist_id_str = request.GET.get("terapeut_id", "")
+    
+    try:
+        year = int(year_str)
+        month = int(month_str)
+    except (ValueError, TypeError):
+        return HttpResponse("Dată invalidă", status=400)
+    
+    try:
+        therapist_id = int(therapist_id_str)
+    except (ValueError, TypeError):
+        return HttpResponse("Terapeut invalid", status=400)
+    
+    try:
+        therapist = Therapist.objects.get(pk=therapist_id)
+    except Therapist.DoesNotExist:
+        return HttpResponse("Terapeut nu găsit", status=404)
+    
+    # Fetch therapies for the month
+    therapies = (
+        Therapy.objects
+        .filter(therapist_id=therapist_id, date__year=year, date__month=month)
+        .select_related("child")
+        .order_by("child__last_name", "child__first_name")
+    )
+    
+    # Group by child
+    child_counts = {}
+    child_names = {}
+    child_cnps = {}
+    for therapy in therapies:
+        cid = therapy.child_id
+        child_counts[cid] = child_counts.get(cid, 0) + 1
+        child_names[cid] = f"{therapy.child.first_name} {therapy.child.last_name}"
+        child_cnps[cid] = therapy.child.cnp
+    
+    # Get standard therapy rate
+    try:
+        pret_rate = Pret.objects.get(name="Taxa terapie standard")
+        rate_value = int(pret_rate.valoare)
+    except Pret.DoesNotExist:
+        rate_value = 135
+    
+    # Build Excel rows
+    data_rows = []
+    total_hours = 0
+    total_amount = 0
+    
+    for idx, (cid, cnt) in enumerate(sorted(child_counts.items(), key=lambda x: child_names[x[0]].lower()), 1):
+        hours = cnt * 2
+        amount = hours * rate_value
+        data_rows.append([
+            idx,  # Nr. crt.
+            child_cnps[cid],  # CNP
+            hours,  # Număr servicii conexe (ore)
+            rate_value,  # Tarif
+            amount,  # Suma
+        ])
+        total_hours += hours
+        total_amount += amount
+    
+    # Build headers and subheaders
+    headers = [
+        "Nr. crt.",
+        "CNP bolnav beneficiar de servicii conexe actului medical acordate persoanelor diagnosticate cu TSA",
+        "Număr de servicii conexe",
+        "Tarif serviciu conex",
+        "Sumă decontată",
+    ]
+    
+    subheaders = [
+        "C0",
+        "C1",
+        "C2",
+        "C3",
+        "C4=C2*C3",
+    ]
+    
+    # Add total row
+    total_row = [
+        "",  # Nr. crt.
+        "Total",  # CNP
+        total_hours,  # Total ore
+        "",  # Tarif
+        total_amount,  # Total amount
+    ]
+    
+    # Create Excel workbook
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Raport"
+    
+    # Add headers (row 1)
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="0066CC", end_color="0066CC", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    
+    # Add subheaders (row 2)
+    for col_idx, subheader in enumerate(subheaders, 1):
+        cell = ws.cell(row=2, column=col_idx, value=subheader)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Add data rows (starting from row 3)
+    for row_idx, row_data in enumerate(data_rows, 3):
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            if col_idx in [3, 4, 5]:  # Hours, Tarif, Amount columns - all integers
+                cell.number_format = '0'
+            
+            # Apply specific alignment per column
+            if col_idx == 1:  # Nr. crt. - center
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 2:  # CNP - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif col_idx == 3:  # Ore - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif col_idx == 4:  # Tarif - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif col_idx == 5:  # Suma - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+    
+    # Add total row
+    total_row_idx = len(data_rows) + 3
+    for col_idx, value in enumerate(total_row, 1):
+        cell = ws.cell(row=total_row_idx, column=col_idx, value=value)
+        cell.font = Font(bold=True)
+        if col_idx in [3, 4, 5]:  # Hours, Tarif, Amount columns - all integers
+            cell.number_format = '0'
+        cell.fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
+        
+        # Apply specific alignment per column in total row
+        if col_idx == 1:  # Nr. crt. - center
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        elif col_idx == 2:  # CNP "Total" - left
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        elif col_idx == 3:  # Total Ore - right
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+        elif col_idx == 4:  # Tarif (empty) - left
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        elif col_idx == 5:  # Total Suma - right
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+    
+    # Adjust column widths
+    ws.column_dimensions['A'].width = 10
+    ws.column_dimensions['B'].width = 25
+    ws.column_dimensions['C'].width = 15
+    ws.column_dimensions['D'].width = 15
+    ws.column_dimensions['E'].width = 15
+    
+    # Generate Excel file
+    excel_buffer = io.BytesIO()
+    wb.save(excel_buffer)
+    excel_buffer.seek(0)
+    
+    ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
+    therapist_name = f"{therapist.last_name}_{therapist.first_name}".replace(" ", "_").lower()
+    month_name = MONTHS_RO[month]
+    
+    response = HttpResponse(
+        excel_buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response['Content-Disposition'] = (
+        f'attachment; filename="raport_terapeut_{therapist_name}_{month_name}_{year}_{ts}.xlsx"'
+    )
+    return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────

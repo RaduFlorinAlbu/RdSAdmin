@@ -9,7 +9,7 @@ from django.urls import path
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
-from .models import Centru, Child, Document, Parent, Therapist, Therapy, TherapistDocument
+from .models import Centru, Child, Document, Parent, Therapist, Therapy, TherapistDocument, Pret
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -329,9 +329,9 @@ class RdsAdminSite(admin.AdminSite):
     def get_urls(self):
         from .views import (
             TherapyBatchView, TherapyBatchPrepopulatedView, RaportLunarView, RaportAnualView, RaportSaptamanaiView,
-            RaportZilnicView,
+            RaportZilnicView, RaportZilnicTerapeutView,
             raport_lunar_excel, raport_anual_excel, raport_saptamanal_excel,
-            raport_zilnic_excel,
+            raport_zilnic_excel, raport_terapeut_excel,
         )
         custom = [
             path(
@@ -348,6 +348,11 @@ class RdsAdminSite(admin.AdminSite):
                 "core/rapoarte/zilnic/",
                 self.admin_view(RaportZilnicView.as_view()),
                 name="raport_zilnic",
+            ),
+            path(
+                "core/rapoarte/zilnic-terapeut/",
+                self.admin_view(RaportZilnicTerapeutView.as_view()),
+                name="raport_zilnic_terapeut",
             ),
             path(
                 "core/rapoarte/lunar/",
@@ -368,6 +373,11 @@ class RdsAdminSite(admin.AdminSite):
                 "core/rapoarte/zilnic/excel/",
                 self.admin_view(raport_zilnic_excel),
                 name="raport_zilnic_excel",
+            ),
+            path(
+                "core/rapoarte/zilnic-terapeut/excel/",
+                self.admin_view(raport_terapeut_excel),
+                name="raport_terapeut_excel",
             ),
             path(
                 "core/rapoarte/lunar/excel/",
@@ -392,6 +402,7 @@ class RdsAdminSite(admin.AdminSite):
         ctx["batch_therapy_url"]  = "core/therapy/batch/"
         ctx["batch_therapy_prepopulat_url"] = "core/therapy/batch/prepopulat/"
         ctx["raport_zilnic_url"] = "core/rapoarte/zilnic/"
+        ctx["raport_zilnic_terapeut_url"] = "core/rapoarte/zilnic-terapeut/"
         ctx["raport_lunar_url"]  = "core/rapoarte/lunar/"
         ctx["raport_anual_url"]  = "core/rapoarte/anual/"
         ctx["raport_sapt_url"]   = "core/rapoarte/saptamanal/"
@@ -449,7 +460,7 @@ class RdsAdminSite(admin.AdminSite):
 
         sections = [
             group("persoane",   "Persoane",   ["parent", "child", "therapist"]),
-            group("auxiliare",  "Auxiliare",  ["centru", "therapy"]),
+            group("auxiliare",  "Auxiliare",  ["centru", "therapy", "pret"]),
             group("documente",  "Documente",  ["document", "therapistdocument"]),
         ]
         if request.user.is_superuser:
@@ -758,6 +769,33 @@ class TherapistDocumentAdmin(StaffFullAccessMixin, admin.ModelAdmin):
         if not obj.pdf_file:
             return "—"
         return format_html('<a href="{}" download>⬇ Descarcă</a>', obj.pdf_file.url)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pret admin
+# ──────────────────────────────────────────────────────────────────────────────
+@admin.register(Pret, site=admin_site)
+class PretAdmin(StaffFullAccessMixin, admin.ModelAdmin):
+    list_display = ("name", "valoare", "editable")
+    list_filter = ("editable",)
+    search_fields = ("name",)
+    readonly_fields = ("name",)
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make 'name' read-only for non-editable entries."""
+        if obj and not obj.editable:
+            return ("name",)
+        return self.readonly_fields
+
+    def get_fields(self, request, obj=None):
+        """Define form field order."""
+        return ("name", "valoare", "editable")
+
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deletion of non-editable entries."""
+        if obj and not obj.editable:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -362,3 +362,29 @@ class TherapistDocument(models.Model):
 
     def __str__(self):
         return f"{self.name} – {self.therapist}"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pret
+# ──────────────────────────────────────────────────────────────────────────────
+class Pret(models.Model):
+    name = models.CharField(
+        "Nume",
+        max_length=200,
+        unique=True,
+    )
+    valoare = models.IntegerField(
+        "Valoare",
+    )
+    editable = models.BooleanField(
+        "Editabil",
+        default=True,
+        help_text="Dacă False, acest preț nu poate fi editat/șters (e folosit de rapoarte).",
+    )
+
+    class Meta:
+        verbose_name = "Preț"
+        verbose_name_plural = "Prețuri"
+
+    def __str__(self):
+        return f"{self.name}: {self.valoare}"
