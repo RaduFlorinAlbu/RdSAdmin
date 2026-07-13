@@ -64,8 +64,8 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
     Format:
     - A4 Landscape
     - Header: Date (top-left) and Centre name
-    - Tables: Therapist tables arranged in a grid (max 6 per row)
-    - Grouped by centre
+    - Tables: Therapist tables arranged in a grid (max 5 per row)
+    - Grouped by centre, with pagination for large centres
     - Only populated rows (no empty time slots)
     - Tables aligned by height within each row
     
@@ -160,124 +160,144 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
         fontName='Helvetica-Bold',
     )
     
+    page_label_style = ParagraphStyle(
+        'PageLabelStyle',
+        fontSize=10,
+        textColor=colors.grey,
+        spaceAfter=6,
+    )
+    
+    # Parameters
+    tables_per_row = 5
+    row_spacing = 8 * mm
+    table_height_per_row = 36 * mm  # Estimated height per row of tables + spacing
+    max_rows_per_page = 4  # Estimate: ~4 rows of tables fit per page
+    tables_per_page = tables_per_row * max_rows_per_page  # ~20 tables per page
+    
     # For each centre (sorted alphabetically by name)
     is_first_page = True
     for centre, therapists_data in sorted(centres.items(), key=lambda x: x[0].name.lower()):
-        if not is_first_page:
-            story.append(PageBreak())
-        is_first_page = False
+        # Paginate tables for this centre
+        sorted_therapists = sorted(therapists_data, key=lambda x: (x['therapist'].last_name.lower(), x['therapist'].first_name.lower()))
         
-        # Header: Date and Centre
-        date_str = selected_date.strftime('%d.%m.%Y')
-        story.append(Paragraph(f"<b>Data:</b> {date_str}", date_style))
+        # Split into pages if needed
+        centre_pages = []
+        for i in range(0, len(sorted_therapists), tables_per_page):
+            centre_pages.append(sorted_therapists[i:i + tables_per_page])
         
-        story.append(Paragraph(f"<b>{centre.name}</b>", centre_style))
-        
-        # Generate tables for this centre's therapists
-        all_tables = []
-        
-        for therapist_data in sorted(therapists_data, key=lambda x: (x['therapist'].last_name.lower(), x['therapist'].first_name.lower())):
-            therapist = therapist_data['therapist']
-            therapies_list = therapist_data['therapies']
-            has_sessions = therapist_data['has_sessions']
+        # Generate content for each page of this centre
+        for page_num, therapists_page in enumerate(centre_pages, 1):
+            if not is_first_page:
+                story.append(PageBreak())
+            is_first_page = False
             
-            # Sort therapies by start time
-            therapies_list = sorted(therapies_list, key=lambda x: x.start_time)
+            # Header: Date and Centre
+            date_str = selected_date.strftime('%d.%m.%Y')
+            story.append(Paragraph(f"<b>Data:</b> {date_str}", date_style))
             
-            # Build therapist table
-            table_data = []
+            story.append(Paragraph(f"<b>{centre.name}</b>", centre_style))
             
-            # Header row: therapist name (will span 2 columns)
-            therapist_name = f"{therapist.last_name} {therapist.first_name}"
-            table_data.append([therapist_name, ''])  # 2 columns, second is empty for spanning
+            # Page label (only if more than one page for this centre)
+            if len(centre_pages) > 1:
+                story.append(Paragraph(f"Pagina {page_num}", page_label_style))
             
-            # If therapist has sessions: add only the populated rows
-            # If therapist has NO sessions: add 4 empty time slots (8-10, 10-12, 12-14, 14-16)
-            if has_sessions:
-                for therapy in therapies_list:
-                    start_time = therapy.start_time
-                    end_time = time((start_time.hour + 2) % 24, 0)
-                    interval = f"{start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
-                    child_name = f"{therapy.child.first_name} {therapy.child.last_name}"
-                    table_data.append([interval, child_name])
-            else:
-                # Add 4 empty slots
-                empty_slots = ['08:00', '10:00', '12:00', '14:00']
-                for slot in empty_slots:
-                    h = int(slot.split(':')[0])
-                    end_h = h + 2
-                    interval = f"{slot}-{end_h:02d}:00"
-                    table_data.append([interval, ''])
+            # Generate tables for this page
+            all_tables = []
             
-            # Create table with 2 columns: time and child
-            # Keep columns small so multiple tables fit on a row
-            col_widths = [18*mm, 22*mm]  # Total: 40mm per table
-            row_heights = [4*mm] * len(table_data)
+            for therapist_data in therapists_page:
+                therapist = therapist_data['therapist']
+                therapies_list = therapist_data['therapies']
+                has_sessions = therapist_data['has_sessions']
+                
+                # Sort therapies by start time
+                therapies_list = sorted(therapies_list, key=lambda x: x.start_time)
+                
+                # Build therapist table
+                table_data = []
+                
+                # Header row: therapist name (will span 2 columns)
+                therapist_name = f"{therapist.last_name} {therapist.first_name}"
+                table_data.append([therapist_name, ''])  # 2 columns, second is empty for spanning
+                
+                # If therapist has sessions: add only the populated rows
+                # If therapist has NO sessions: add 4 empty time slots (8-10, 10-12, 12-14, 14-16)
+                if has_sessions:
+                    for therapy in therapies_list:
+                        start_time = therapy.start_time
+                        end_time = time((start_time.hour + 2) % 24, 0)
+                        interval = f"{start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
+                        child_name = f"{therapy.child.first_name} {therapy.child.last_name}"
+                        table_data.append([interval, child_name])
+                else:
+                    # Add 4 empty slots
+                    empty_slots = ['08:00', '10:00', '12:00', '14:00']
+                    for slot in empty_slots:
+                        h = int(slot.split(':')[0])
+                        end_h = h + 2
+                        interval = f"{slot}-{end_h:02d}:00"
+                        table_data.append([interval, ''])
+                
+                # Create table with 2 columns: time and child
+                # Wider than before to accommodate longer names
+                col_widths = [19*mm, 31*mm]  # Total: 50mm per table (was 44mm)
+                row_heights = [4*mm] * len(table_data)
+                
+                table = Table(
+                    table_data,
+                    colWidths=col_widths,
+                    rowHeights=row_heights,
+                )
+                
+                # Style table
+                table.setStyle(TableStyle([
+                    # Header row styling (spans 2 columns)
+                    ('SPAN', (0, 0), (1, 0)),  # Merge header across both columns
+                    ('BACKGROUND', (0, 0), (1, 0), colors.HexColor('#0066cc')),
+                    ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (1, 0), 'CENTER'),  # Center header text
+                    ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (1, 0), 8),
+                    ('TOPPADDING', (0, 0), (1, 0), 2),
+                    ('BOTTOMPADDING', (0, 0), (1, 0), 2),
+                    # Data rows styling
+                    ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 6),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f8f8')]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+                    ('TOPPADDING', (0, 1), (-1, -1), 1),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 1),
+                ]))
+                
+                all_tables.append(table)
             
-            table = Table(
-                table_data,
-                colWidths=col_widths,
-                rowHeights=row_heights,
-            )
-            
-            # Style table
-            table.setStyle(TableStyle([
-                # Header row styling (spans 2 columns)
-                ('SPAN', (0, 0), (1, 0)),  # Merge header across both columns
-                ('BACKGROUND', (0, 0), (1, 0), colors.HexColor('#0066cc')),
-                ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (1, 0), 'CENTER'),  # Center header text
-                ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (1, 0), 8),
-                ('TOPPADDING', (0, 0), (1, 0), 2),
-                ('BOTTOMPADDING', (0, 0), (1, 0), 2),
-                # Data rows styling
-                ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('FONTSIZE', (0, 1), (-1, -1), 6),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f8f8')]),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-                ('LEFTPADDING', (0, 0), (-1, -1), 2),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-                ('TOPPADDING', (0, 1), (-1, -1), 1),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 1),
-            ]))
-            
-            all_tables.append(table)
-        
-        # Layout tables in grid: max 6 per row
-        tables_per_row = 6
-        row_spacing = 8 * mm
-        
-        # Build rows
-        for row_idx in range(0, len(all_tables), tables_per_row):
-            row_tables = all_tables[row_idx:row_idx + tables_per_row]
-            num_in_row = len(row_tables)
-            
-            # Calculate width available per table column
-            spacing_total = (num_in_row - 1) * 2 * mm  # 2mm space between tables
-            available = usable_width - spacing_total
-            col_width = available / num_in_row
-            
-            # Create row container
-            row_table = Table(
-                [row_tables],
-                colWidths=[col_width] * num_in_row,
-                rowHeights=None,  # Auto height
-                hAlign='LEFT',
-            )
-            
-            row_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 0),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 1*mm),
-                ('TOPPADDING', (0, 0), (-1, -1), 0),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-            ]))
-            
-            story.append(row_table)
-            story.append(Spacer(1, row_spacing))
+            # Layout tables in grid: max 5 per row, left-aligned
+            for row_idx in range(0, len(all_tables), tables_per_row):
+                row_tables = all_tables[row_idx:row_idx + tables_per_row]
+                num_in_row = len(row_tables)
+                
+                # Create row container with left alignment
+                # Column width = 50mm (table) + 4mm (gap) = 54mm per column
+                row_table = Table(
+                    [row_tables + [''] * (tables_per_row - num_in_row)],  # Pad with empty cells
+                    colWidths=[54*mm] * tables_per_row,
+                    rowHeights=None,  # Auto height
+                    hAlign='LEFT',
+                )
+                
+                row_table.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (num_in_row - 1, 0), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ]))
+                
+                story.append(row_table)
+                story.append(Spacer(1, row_spacing))
     
     # Build PDF
     doc.build(story)
