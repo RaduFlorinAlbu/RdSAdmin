@@ -14,7 +14,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from django.utils.text import slugify
 
-from core.models import Therapy, Centru
+from core.models import Therapy, Centru, Therapist
 
 
 class AlignedTableRow(Flowable):
@@ -103,24 +103,39 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
     # Fetch all therapies for this date
     therapies = Therapy.objects.filter(date=selected_date).select_related('therapist', 'child', 'therapist__centru', 'centru')
     
-    # Group by therapist
+    # Build therapies_by_therapist map from existing therapies
     therapies_by_therapist = {}
     for therapy in therapies:
         t = therapy.therapist
         if t.id not in therapies_by_therapist:
             therapies_by_therapist[t.id] = {
                 'therapist': t,
-                'therapies': []
+                'therapies': [],
+                'has_sessions': True,
             }
         therapies_by_therapist[t.id]['therapies'].append(therapy)
+    
+    # Fetch ALL therapists and add those without sessions
+    all_therapists = Therapist.objects.select_related('centru').order_by('last_name', 'first_name')
+    for therapist in all_therapists:
+        if therapist.id not in therapies_by_therapist:
+            therapies_by_therapist[therapist.id] = {
+                'therapist': therapist,
+                'therapies': [],
+                'has_sessions': False,
+            }
     
     # Group by centre — use snapshotted centru from therapy, fall back to therapist.centru
     centres = {}
     for t_id, data in therapies_by_therapist.items():
         therapist = data['therapist']
-        # Use centru snapshot from any therapy of this therapist (they all have same centru for a given save)
-        first_therapy = data['therapies'][0]
-        centre = first_therapy.centru if first_therapy.centru_id else therapist.centru
+        
+        # Determine centre: from therapy snapshot if has sessions, else from therapist
+        if data['has_sessions']:
+            first_therapy = data['therapies'][0]
+            centre = first_therapy.centru if first_therapy.centru_id else therapist.centru
+        else:
+            centre = therapist.centru
         
         if centre not in centres:
             centres[centre] = []
@@ -145,9 +160,9 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
         fontName='Helvetica-Bold',
     )
     
-    # For each centre (None = "Fără centru" comes first)
+    # For each centre (sorted alphabetically by name)
     is_first_page = True
-    for centre, therapists_data in sorted(centres.items(), key=lambda x: (x[0] is not None, x[0].name.lower() if x[0] else '')):
+    for centre, therapists_data in sorted(centres.items(), key=lambda x: x[0].name.lower()):
         if not is_first_page:
             story.append(PageBreak())
         is_first_page = False
@@ -156,10 +171,7 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
         date_str = selected_date.strftime('%d.%m.%Y')
         story.append(Paragraph(f"<b>Data:</b> {date_str}", date_style))
         
-        if centre:
-            story.append(Paragraph(f"<b>{centre.name}</b>", centre_style))
-        else:
-            story.append(Paragraph("<b>Fara Centru</b>", centre_style))
+        story.append(Paragraph(f"<b>{centre.name}</b>", centre_style))
         
         # Generate tables for this centre's therapists
         all_tables = []
@@ -167,28 +179,35 @@ def generate_therapy_pdf(selected_date: date) -> bytes:
         for therapist_data in sorted(therapists_data, key=lambda x: (x['therapist'].last_name.lower(), x['therapist'].first_name.lower())):
             therapist = therapist_data['therapist']
             therapies_list = therapist_data['therapies']
+            has_sessions = therapist_data['has_sessions']
             
             # Sort therapies by start time
             therapies_list = sorted(therapies_list, key=lambda x: x.start_time)
             
-            # Build therapist table - ONLY populated rows
+            # Build therapist table
             table_data = []
             
             # Header row: therapist name (will span 2 columns)
             therapist_name = f"{therapist.last_name} {therapist.first_name}"
             table_data.append([therapist_name, ''])  # 2 columns, second is empty for spanning
             
-            # Add only rows with therapies
-            for therapy in therapies_list:
-                start_time = therapy.start_time
-                end_time = time((start_time.hour + 2) % 24, 0)
-                interval = f"{start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
-                child_name = f"{therapy.child.first_name} {therapy.child.last_name}"
-                table_data.append([interval, child_name])
-            
-            # If no therapies, skip empty tables
-            if len(table_data) == 1:
-                continue
+            # If therapist has sessions: add only the populated rows
+            # If therapist has NO sessions: add 4 empty time slots (8-10, 10-12, 12-14, 14-16)
+            if has_sessions:
+                for therapy in therapies_list:
+                    start_time = therapy.start_time
+                    end_time = time((start_time.hour + 2) % 24, 0)
+                    interval = f"{start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
+                    child_name = f"{therapy.child.first_name} {therapy.child.last_name}"
+                    table_data.append([interval, child_name])
+            else:
+                # Add 4 empty slots
+                empty_slots = ['08:00', '10:00', '12:00', '14:00']
+                for slot in empty_slots:
+                    h = int(slot.split(':')[0])
+                    end_h = h + 2
+                    interval = f"{slot}-{end_h:02d}:00"
+                    table_data.append([interval, ''])
             
             # Create table with 2 columns: time and child
             # Keep columns small so multiple tables fit on a row

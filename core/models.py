@@ -71,8 +71,6 @@ class Therapist(models.Model):
         verbose_name="Centru",
         on_delete=models.PROTECT,
         related_name="therapists",
-        null=True,
-        blank=True,
     )
 
     class Meta:
