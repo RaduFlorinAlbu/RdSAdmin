@@ -42,9 +42,11 @@ def _therapies_for_date(session_date: date) -> list:
 @method_decorator(staff_member_required, name="dispatch")
 class TherapyBatchView(View):
     template_name = "admin/core/therapy_batch.html"
+    skip_missing_patient = False
 
-    def _base_context(self, request):
+    def _base_context(self, request, initial_date=None):
         return {
+            "initial_date": initial_date or date.today().isoformat(),
             **admin_site_context(request),
             "therapists": list(
                 Therapist.objects.order_by(Lower("last_name"), Lower("first_name")).values("id", "first_name", "last_name")
@@ -69,7 +71,7 @@ class TherapyBatchView(View):
                 return JsonResponse({"error": "invalid date"}, status=400)
             return JsonResponse({"tables": _therapies_for_date(session_date)})
 
-        return render(request, self.template_name, self._base_context(request))
+        return render(request, self.template_name, self._base_context(request, request.GET.get("date")))
 
     def post(self, request):
         selected_date_str = request.POST.get("session_date", "")
@@ -187,6 +189,8 @@ class TherapyBatchView(View):
                     interval_str = "necunoscut"
 
                 if not child_id:
+                    if self.skip_missing_patient:
+                        continue  # silently skip empty slots in prepopulated mode
                     errors.append(f"Tabela {idx_to_display_num[t_idx]}, interval {interval_str}: pacient neselectat.")
                     table_has_errors = True
                     continue
@@ -312,7 +316,27 @@ class TherapyBatchView(View):
             f"({deleted} înlocuite)." if deleted else
             f"Orar salvat pentru {session_date}: {len(to_create)} ședință(e)."
         )
-        return redirect("admin:therapy_batch")
+        return redirect(f"/admin/core/therapy/batch/?date={selected_date_str}")
+
+
+@method_decorator(staff_member_required, name="dispatch")
+class TherapyBatchPrepopulatedView(TherapyBatchView):
+    template_name = "admin/core/therapy_batch_prepopulated.html"
+    skip_missing_patient = True
+
+    def _base_context(self, request, initial_date=None):
+        ctx = super()._base_context(request, initial_date)
+        ctx["title"] = "Editează/Adaugă orar prepopulat"
+        return ctx
+
+    def post(self, request):
+        # Same as parent but redirects to prepopulat URL after save
+        selected_date_str = request.POST.get("session_date", "")
+        response = super().post(request)
+        # If it was a redirect to batch, change it to prepopulat
+        if hasattr(response, 'url') and '/batch/' in response.url and '/prepopulat/' not in response.url:
+            return redirect(f"/admin/core/therapy/batch/prepopulat/?date={selected_date_str}")
+        return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -1,9 +1,9 @@
 {% extends "admin/base_site.html" %}
 {% load i18n %}
 
-{% block title %}Editează/Adaugă orar{% endblock %}
+{% block title %}Editează/Adaugă orar prepopulat{% endblock %}
 
-{% block content_title %}<h1>Editează/Adaugă orar</h1>{% endblock %}
+{% block content_title %}<h1>Editează/Adaugă orar prepopulat</h1>{% endblock %}
 
 {% block extrahead %}
 {{ block.super }}
@@ -153,8 +153,6 @@
 
     {# ── Tables container ── #}
     <div id="tables-container"></div>
-
-    <button type="button" class="add-table-btn" onclick="addTable()">+ Adaugă tabelă terapeut</button>
 
     <div class="submit-bar">
       <button type="submit" class="submit-btn">Salvează toate ședințele</button>
@@ -420,29 +418,66 @@ async function loadDateFromDB(dateVal, callback) {
   tableCounter = 0;
   document.getElementById('tables-container').innerHTML = '';
 
+  // Build map of therapist_id -> slots from DB
+  const dbSlotsByTherapist = {};
   if (data.tables && data.tables.length > 0) {
-    // Sort tables by therapist name (case-insensitive)
-    const sortedTables = [...data.tables].sort((a, b) => {
-      const therapistA = THERAPISTS.find(t => t.id === a.therapist_id);
-      const therapistB = THERAPISTS.find(t => t.id === b.therapist_id);
-      
-      if (!therapistA) return 1;  // Unsorted/missing therapist goes last
-      if (!therapistB) return -1;
-      
-      const aName = `${therapistA.last_name} ${therapistA.first_name}`.toLowerCase();
-      const bName = `${therapistB.last_name} ${therapistB.first_name}`.toLowerCase();
-      
-      return aName.localeCompare(bName, 'ro', { sensitivity: 'base' });
+    data.tables.forEach(t => {
+      dbSlotsByTherapist[t.therapist_id] = t.slots || [];
     });
-    
-    sortedTables.forEach((t, i) => addTableWithIdx(i, t.therapist_id, t.slots || []));
-    tableCounter = data.tables.length;
   }
+
+  // Given existing slots, always ensure at least minCount slots are shown.
+  // Empty slots are appended with the next non-overlapping 2h start time.
+  function ensureMinSlots(existingSlots, minCount) {
+    const slots = existingSlots.map(s => ({child_id: s.child_id || null, start_time: s.start_time || null}));
+
+    // Collect occupied start hours from existing slots
+    const usedStarts = new Set(
+      slots.filter(s => s.start_time).map(s => parseInt(s.start_time.split(':')[0]))
+    );
+
+    while (slots.length < minCount) {
+      // Find the last slot that has a time
+      const lastWithTime = [...slots].reverse().find(s => s.start_time);
+      // Start searching from: end of last filled slot, or 08:00 if none
+      const searchFrom = lastWithTime ? parseInt(lastWithTime.start_time.split(':')[0]) + 2 : 8;
+
+      // Find next hour >= searchFrom that doesn't overlap any used slot
+      // Slot at H covers [H, H+2). Overlaps with used U if H < U+2 AND U < H+2.
+      let nextH = searchFrom;
+      while (nextH <= 18) {
+        let conflicts = false;
+        for (const u of usedStarts) {
+          if (nextH < u + 2 && u < nextH + 2) { conflicts = true; break; }
+        }
+        if (!conflicts) break;
+        nextH++;
+      }
+
+      if (nextH > 18) {
+        // No room left — add an empty slot with no time
+        slots.push({child_id: null, start_time: null});
+      } else {
+        const startStr = `${String(nextH).padStart(2, '0')}:00`;
+        slots.push({child_id: null, start_time: startStr});
+        usedStarts.add(nextH);
+      }
+    }
+
+    return slots;
+  }
+
+  // Always show ALL therapists — use DB slots padded to 4, else default 4 starting 08:00
+  THERAPISTS.forEach((t, i) => {
+    const rawSlots = dbSlotsByTherapist[t.id] || [];
+    const slots = ensureMinSlots(rawSlots, 4);
+    addTableWithIdx(i, t.id, slots);
+  });
+  tableCounter = THERAPISTS.length;
 
   refreshAllTherapistDropdowns();
   refreshAllChildDropdowns();
-  
-  // Call callback if provided
+
   if (callback && typeof callback === 'function') {
     callback();
   }

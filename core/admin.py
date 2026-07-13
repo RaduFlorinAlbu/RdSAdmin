@@ -322,7 +322,7 @@ class RdsAdminSite(admin.AdminSite):
 
     def get_urls(self):
         from .views import (
-            TherapyBatchView, RaportLunarView, RaportAnualView, RaportSaptamanaiView,
+            TherapyBatchView, TherapyBatchPrepopulatedView, RaportLunarView, RaportAnualView, RaportSaptamanaiView,
             RaportZilnicView,
             raport_lunar_excel, raport_anual_excel, raport_saptamanal_excel,
             raport_zilnic_excel,
@@ -332,6 +332,11 @@ class RdsAdminSite(admin.AdminSite):
                 "core/therapy/batch/",
                 self.admin_view(TherapyBatchView.as_view()),
                 name="therapy_batch",
+            ),
+            path(
+                "core/therapy/batch/prepopulat/",
+                self.admin_view(TherapyBatchPrepopulatedView.as_view()),
+                name="therapy_batch_prepopulat",
             ),
             path(
                 "core/rapoarte/zilnic/",
@@ -379,6 +384,7 @@ class RdsAdminSite(admin.AdminSite):
     def each_context(self, request):
         ctx = super().each_context(request)
         ctx["batch_therapy_url"]  = "core/therapy/batch/"
+        ctx["batch_therapy_prepopulat_url"] = "core/therapy/batch/prepopulat/"
         ctx["raport_zilnic_url"] = "core/rapoarte/zilnic/"
         ctx["raport_lunar_url"]  = "core/rapoarte/lunar/"
         ctx["raport_anual_url"]  = "core/rapoarte/anual/"
