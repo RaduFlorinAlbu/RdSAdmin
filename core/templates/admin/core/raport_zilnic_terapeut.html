@@ -1,0 +1,155 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Raport terapeut{% endblock %}
+{% block content_title %}<h1>👩 Raport terapeut{% if month_name %} — {{ month_name }} {{ year }}{% endif %}</h1>{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  .raport-filters {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 12px; margin-bottom: 20px;
+  }
+  .raport-filters label { font-weight: bold; }
+  .raport-filters input[type="date"], 
+  .raport-filters select,
+  .raport-filters button {
+    padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px;
+    font-size: 14px;
+  }
+  .raport-filters button {
+    background: #318CE7; color: #fff; border-color: #1a6bbf; cursor: pointer;
+  }
+  .raport-filters button:hover { background: #1a6bbf; }
+
+  .raport-wrap { overflow-x: auto; }
+  .raport-table {
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 600px;
+  }
+  .raport-table th, .raport-table td {
+    border: 1px solid #ddd;
+    padding: 6px 12px;
+    text-align: center;
+  }
+  .raport-table th {
+    background: #318CE7; color: #fff;
+  }
+  .raport-table th.col-left { text-align: left; }
+  .raport-table tbody tr:nth-child(even) { background: #f5f8ff; }
+  .raport-table tbody tr:hover { background: #ddeeff; }
+  .raport-table td.col-left { text-align: left; }
+  .raport-table td.total-col { font-weight: bold; background: #e8f4fd; }
+
+  .back-links { margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .back-links a { color: #318CE7; text-decoration: none; font-size: 14px; }
+  .back-links a:hover { text-decoration: underline; }
+
+  .btn-excel,
+  .btn-excel:link,
+  .btn-excel:visited {
+    background: #1e7e34; color: #fff;
+    padding: 5px 12px; border-radius: 4px;
+    text-decoration: none; font-size: 13px;
+    transition: background .15s;
+  }
+  .btn-excel:hover { background: #145523; color: #fff; }
+  .no-data { color: #888; padding: 20px 0; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="back-links">
+  <a href="/admin/">← Acasă</a>
+  {% if year and month and selected_therapist_id %}
+  <a href="/admin/core/rapoarte/zilnic-terapeut/excel/?year={{ year }}&month={{ month }}&terapeut_id={{ selected_therapist_id }}" class="btn-excel">
+    &#x2B07; Descarcă Excel
+  </a>
+  {% endif %}
+</div>
+
+<form method="get" class="raport-filters">
+  <label for="sel-year">Anul:</label>
+  <select id="sel-year" name="year">
+    {% for y in available_years %}
+      <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+    {% endfor %}
+  </select>
+  
+  <label for="sel-month">Luna:</label>
+  <select id="sel-month" name="month">
+    <option value="1" {% if month == 1 %}selected{% endif %}>Ianuarie</option>
+    <option value="2" {% if month == 2 %}selected{% endif %}>Februarie</option>
+    <option value="3" {% if month == 3 %}selected{% endif %}>Martie</option>
+    <option value="4" {% if month == 4 %}selected{% endif %}>Aprilie</option>
+    <option value="5" {% if month == 5 %}selected{% endif %}>Mai</option>
+    <option value="6" {% if month == 6 %}selected{% endif %}>Iunie</option>
+    <option value="7" {% if month == 7 %}selected{% endif %}>Iulie</option>
+    <option value="8" {% if month == 8 %}selected{% endif %}>August</option>
+    <option value="9" {% if month == 9 %}selected{% endif %}>Septembrie</option>
+    <option value="10" {% if month == 10 %}selected{% endif %}>Octombrie</option>
+    <option value="11" {% if month == 11 %}selected{% endif %}>Noiembrie</option>
+    <option value="12" {% if month == 12 %}selected{% endif %}>Decembrie</option>
+  </select>
+  
+  <label for="sel-terapeut">Terapeut:</label>
+  <select id="sel-terapeut" name="terapeut_id">
+    <option value="">-- Selectează terapeut --</option>
+    {% for therapist in therapists %}
+      <option value="{{ therapist.id }}" {% if therapist.id == selected_therapist_id %}selected{% endif %}>
+        {{ therapist.last_name }} {{ therapist.first_name }}
+      </option>
+    {% endfor %}
+  </select>
+  
+  <button type="submit">Afișează</button>
+</form>
+
+{% if selected_therapist and year and month %}
+  {% if rows %}
+  <div class="raport-wrap">
+    <table class="raport-table">
+      <thead>
+        <tr>
+          <th>Nr. crt.</th>
+          <th>CNP</th>
+          <th>Ore terapie</th>
+          <th>Tarif/oră</th>
+          <th>Suma</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.nr_crt }}</td>
+          <td class="col-left">{{ row.cnp }}</td>
+          <td>{{ row.hours }}</td>
+          <td>{{ row.rate }}</td>
+          <td>{{ row.amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="total-col"></td>
+          <td class="col-left total-col">Total</td>
+          <td class="total-col">{{ total_hours }}</td>
+          <td class="total-col"></td>
+          <td class="total-col">{{ total_amount }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <p class="no-data">Nu există ședințe înregistrate pentru {{ selected_therapist.last_name }} {{ selected_therapist.first_name }} în perioada selectată.</p>
+  {% endif %}
+{% elif selected_therapist %}
+  <p class="no-data">Selectează o lună și un an pentru a afișa raportul.</p>
+{% elif year and month %}
+  <p class="no-data">Selectează un terapeut pentru a afișa raportul.</p>
+{% else %}
+  <p class="no-data">Selectează o lună, un an și un terapeut pentru a afișa raportul.</p>
+{% endif %}
+{% endblock %}

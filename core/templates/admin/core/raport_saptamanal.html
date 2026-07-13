@@ -86,10 +86,10 @@
   <a href="/admin/core/rapoarte/zilnic/">↕ Raport zilnic</a>
   <a href="/admin/core/rapoarte/lunar/?an={{ year }}">↕ Raport lunar {{ year }}</a>
   <a href="/admin/core/rapoarte/anual/?an={{ year }}">↕ Raport anual {{ year }}</a>
-  <a href="/admin/core/rapoarte/saptamanal/excel/?an={{ year }}&sapt={{ week }}{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}{% if filter_therapist %}&therapist={{ filter_therapist|urlencode }}{% endif %}" class="btn-excel" style="margin-right:4px;">
+  <a href="/admin/core/rapoarte/saptamanal/excel/?an={{ year }}&sapt={{ week }}{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}" class="btn-excel" style="margin-right:4px;">
     &#x2B07; Excel terapii
   </a>
-  <a href="/admin/core/rapoarte/saptamanal/excel/?an={{ year }}&sapt={{ week }}&ore=1{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}{% if filter_therapist %}&therapist={{ filter_therapist|urlencode }}{% endif %}" class="btn-excel">
+  <a href="/admin/core/rapoarte/saptamanal/excel/?an={{ year }}&sapt={{ week }}&ore=1{% if filter_child %}&child={{ filter_child|urlencode }}{% endif %}" class="btn-excel">
     &#x2B07; Excel ore
   </a>
 </div>
@@ -119,15 +119,6 @@
         {% endfor %}
       </select>
     </div>
-    <div class="filter-group">
-      <label>Terapeut:</label>
-      <select name="therapist" id="therapist-sel">
-        <option value="">— toți —</option>
-        {% for t in therapists_list %}
-          <option value="{{ t }}"{% if t == filter_therapist %} selected{% endif %}>{{ t }}</option>
-        {% endfor %}
-      </select>
-    </div>
   </div>
   <button type="submit" style="margin-top:10px;">Afișează</button>
 </form>
@@ -138,7 +129,6 @@
     <thead>
       <tr>
         <th class="col-left">Pacient</th>
-        <th class="col-left">Terapeut</th>
         <th class="col-left">CNP</th>
         {% for d, name in days|zip:days_ro %}
           <th>{{ name }}<br><small>{{ d|date:"d.m" }}</small></th>
@@ -148,9 +138,8 @@
     </thead>
     <tbody>
       {% for row in rows %}
-      <tr data-child="{{ row.child|lower }}" data-therapist="{{ row.therapist|lower }}">
+      <tr data-child="{{ row.child|lower }}">
         <td class="col-left">{{ row.child }}</td>
-        <td class="col-left">{{ row.therapist }}</td>
         <td class="col-left">{{ row.cnp }}</td>
         {% for v in row.counts %}
           <td {% if not v %}class="zero"{% endif %}>{{ v }}</td>
@@ -216,7 +205,6 @@ function buildSearchableSelect(selectEl) {
 }
 document.addEventListener('DOMContentLoaded', function() {
   buildSearchableSelect(document.getElementById('child-sel'));
-  buildSearchableSelect(document.getElementById('therapist-sel'));
 });
 </script>
 {% endblock %}

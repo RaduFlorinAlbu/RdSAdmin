@@ -9,7 +9,7 @@ from django.urls import path
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
-from .models import Centru, Child, Document, Parent, Therapist, Therapy, TherapistDocument
+from .models import Centru, Child, Document, Parent, Therapist, Therapy, TherapistDocument, Pret
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -75,35 +75,45 @@ class ExpiryDateWidget(AdminDateWidget):
 # Document name widget — dropdown with two presets + free-text fallback
 # ──────────────────────────────────────────────────────────────────────────────
 
-_PREDEFINED_NAMES = ["Certificat de naștere", "Scrisoare Medicală"]
+_PREDEFINED_NAMES = [
+    "Certificat de naștere",
+    "Scrisoare Medicală",
+    "Fișă de evaluare inițială",
+    "Fișă de evaluare periodică",
+]
 _CUSTOM_SENTINEL  = "__custom__"
 
 _DOC_NAME_SCRIPT = (
     '<script>'
     'if(!window._docNameDefined){'
     'window._docNameDefined=true;'
-    # sel = the <select>; finds text input as sibling inside same <div> — no ID dependency
     'window.docNameChange=function(sel){'
     'var CERT="Certificat de na\u0219tere";'
+    'var NO_EXPIRY_DOCS=[CERT];'
     'var CUSTOM="__custom__";'
     'var div=sel.parentElement;'
     'var textEl=div?div.querySelector("input[type=\'text\']"):null;'
     'if(!textEl)return;'
     'textEl.style.display=sel.value===CUSTOM?"":"none";'
     'if(sel.value===CUSTOM)textEl.focus();'
-    # locate expiry input in same <tr> (inline) or standalone form
+    # locate has_expiry checkbox and expiry input in same <tr> (inline) or form
     'var tr=sel.closest("tr");'
+    'var cb=tr?tr.querySelector("input[name$=\'has_expiry\']")'
+    ':document.querySelector("input[name$=\'has_expiry\']");'
     'var exp=tr?tr.querySelector("input[name$=\'expiry_date\']")'
     ':document.querySelector("input[name$=\'expiry_date\']");'
+    'var noExpiry=NO_EXPIRY_DOCS.indexOf(sel.value)!==-1;'
+    'if(cb){'
+    'cb.checked=!noExpiry;'
+    'if(typeof expiryToggle==="function")expiryToggle(cb);}'
     'if(exp){'
-    'var isCert=sel.value===CERT;'
-    'exp.disabled=isCert;'
-    'exp.style.opacity=isCert?"0.4":"";'
-    'if(isCert)exp.value="";'
+    'exp.disabled=noExpiry;'
+    'exp.style.opacity=noExpiry?"0.4":"";'
+    'if(noExpiry)exp.value="";'
     'var cont=exp.parentElement;'
     'while(cont&&!cont.querySelector("button"))cont=cont.parentElement;'
     'if(cont)cont.querySelectorAll("button").forEach(function(b){'
-    'b.disabled=isCert;b.style.opacity=isCert?"0.4":"";});'
+    'b.disabled=noExpiry;b.style.opacity=noExpiry?"0.4":"";});'
     '}}'
     '}'
     '</script>'
@@ -160,12 +170,55 @@ class DocumentNameWidget(forms.Widget):
         return choice
 
 
+_HAS_EXPIRY_SCRIPT = (
+    '<script>'
+    'if(!window._hasExpiryDefined){'
+    'window._hasExpiryDefined=true;'
+    'window.expiryToggle=function(cb){'
+    'var tr=cb.closest("tr");'
+    'if(tr){'
+    'tr.querySelectorAll("td.field-expiry_date,td.field-_expirat").forEach(function(td){'
+    'td.style.opacity=cb.checked?"":"0";'
+    'td.style.pointerEvents=cb.checked?"":"none";'
+    '});return;}'
+    'var cont=cb.closest(".inline-related")||cb.closest("fieldset")||cb.closest("form");'
+    'if(cont){'
+    'var expInp=cont.querySelector("input[name$=\'expiry_date\']");'
+    'if(expInp){'
+    'var row=expInp.closest(".form-row")||expInp.closest("p");'
+    'if(row)row.style.display=cb.checked?"":"none";}}'
+    '};'
+    'document.addEventListener("DOMContentLoaded",function(){'
+    'document.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
+    'expiryToggle(cb);});});'
+    'document.addEventListener("formset:added",function(e){'
+    'var row=e.detail&&e.detail.row;'
+    'if(!row)return;'
+    'row.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
+    'expiryToggle(cb);});});'
+    '}'
+    '</script>'
+)
+
+
+class HasExpiryWidget(forms.CheckboxInput):
+    """Standard checkbox that injects the expiryToggle script and onchange handler."""
+
+    def render(self, name, value, attrs=None, renderer=None):
+        if attrs is None:
+            attrs = {}
+        attrs['onchange'] = 'expiryToggle(this)'
+        base = super().render(name, value, attrs, renderer)
+        return mark_safe(_HAS_EXPIRY_SCRIPT + base)
+
+
 class DocumentForm(forms.ModelForm):
     class Meta:
         model = Document
         fields = '__all__'
         widgets = {
             'name': DocumentNameWidget(),
+            'has_expiry': HasExpiryWidget(),
             'expiry_date': ExpiryDateWidget(),
         }
 
@@ -238,53 +291,6 @@ class TherapistDocNameWidget(forms.Widget):
         return choice
 
 
-_HAS_EXPIRY_SCRIPT = (
-    '<script>'
-    'if(!window._hasExpiryDefined){'
-    'window._hasExpiryDefined=true;'
-    'window.expiryToggle=function(cb){'
-    # TabularInline: use opacity (not visibility/display) so columns stay aligned
-    # and the cell background matches the row stripe (no white border artifact)
-    'var tr=cb.closest("tr");'
-    'if(tr){'
-    'tr.querySelectorAll("td.field-expiry_date,td.field-_expirat").forEach(function(td){'
-    'td.style.opacity=cb.checked?"":"0";'
-    'td.style.pointerEvents=cb.checked?"":"none";'
-    '});return;}'
-    # Standalone form: hide/show the .form-row with expiry_date
-    'var cont=cb.closest(".inline-related")||cb.closest("fieldset")||cb.closest("form");'
-    'if(cont){'
-    'var expInp=cont.querySelector("input[name$=\'expiry_date\']");'
-    'if(expInp){'
-    'var row=expInp.closest(".form-row")||expInp.closest("p");'
-    'if(row)row.style.display=cb.checked?"":"none";}}'
-    '};'
-    # Init existing rows on page load
-    'document.addEventListener("DOMContentLoaded",function(){'
-    'document.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
-    'expiryToggle(cb);});});'
-    # Init new inline rows
-    'document.addEventListener("formset:added",function(e){'
-    'var row=e.detail&&e.detail.row;'
-    'if(!row)return;'
-    'row.querySelectorAll("input[name$=\'has_expiry\']").forEach(function(cb){'
-    'expiryToggle(cb);});});'
-    '}'
-    '</script>'
-)
-
-
-class HasExpiryWidget(forms.CheckboxInput):
-    """Standard checkbox that injects the expiryToggle script and onchange handler."""
-
-    def render(self, name, value, attrs=None, renderer=None):
-        if attrs is None:
-            attrs = {}
-        attrs['onchange'] = 'expiryToggle(this)'
-        base = super().render(name, value, attrs, renderer)
-        return mark_safe(_HAS_EXPIRY_SCRIPT + base)
-
-
 class TherapistDocumentForm(forms.ModelForm):
     class Meta:
         model = TherapistDocument
@@ -322,10 +328,10 @@ class RdsAdminSite(admin.AdminSite):
 
     def get_urls(self):
         from .views import (
-            TherapyBatchView, RaportLunarView, RaportAnualView, RaportSaptamanaiView,
-            RaportZilnicView,
+            TherapyBatchView, TherapyBatchPrepopulatedView, RaportLunarView, RaportAnualView, RaportSaptamanaiView,
+            RaportZilnicView, RaportZilnicTerapeutView,
             raport_lunar_excel, raport_anual_excel, raport_saptamanal_excel,
-            raport_zilnic_excel,
+            raport_zilnic_excel, raport_terapeut_excel,
         )
         custom = [
             path(
@@ -334,9 +340,19 @@ class RdsAdminSite(admin.AdminSite):
                 name="therapy_batch",
             ),
             path(
+                "core/therapy/batch/prepopulat/",
+                self.admin_view(TherapyBatchPrepopulatedView.as_view()),
+                name="therapy_batch_prepopulat",
+            ),
+            path(
                 "core/rapoarte/zilnic/",
                 self.admin_view(RaportZilnicView.as_view()),
                 name="raport_zilnic",
+            ),
+            path(
+                "core/rapoarte/zilnic-terapeut/",
+                self.admin_view(RaportZilnicTerapeutView.as_view()),
+                name="raport_zilnic_terapeut",
             ),
             path(
                 "core/rapoarte/lunar/",
@@ -359,6 +375,11 @@ class RdsAdminSite(admin.AdminSite):
                 name="raport_zilnic_excel",
             ),
             path(
+                "core/rapoarte/zilnic-terapeut/excel/",
+                self.admin_view(raport_terapeut_excel),
+                name="raport_terapeut_excel",
+            ),
+            path(
                 "core/rapoarte/lunar/excel/",
                 self.admin_view(raport_lunar_excel),
                 name="raport_lunar_excel",
@@ -379,7 +400,9 @@ class RdsAdminSite(admin.AdminSite):
     def each_context(self, request):
         ctx = super().each_context(request)
         ctx["batch_therapy_url"]  = "core/therapy/batch/"
+        ctx["batch_therapy_prepopulat_url"] = "core/therapy/batch/prepopulat/"
         ctx["raport_zilnic_url"] = "core/rapoarte/zilnic/"
+        ctx["raport_zilnic_terapeut_url"] = "core/rapoarte/zilnic-terapeut/"
         ctx["raport_lunar_url"]  = "core/rapoarte/lunar/"
         ctx["raport_anual_url"]  = "core/rapoarte/anual/"
         ctx["raport_sapt_url"]   = "core/rapoarte/saptamanal/"
@@ -389,7 +412,7 @@ class RdsAdminSite(admin.AdminSite):
         from django.contrib import messages as dj_messages
         today = date.today()
         # Expired patient documents
-        expired_docs = Document.objects.filter(expiry_date__lt=today, exists=True)
+        expired_docs = Document.objects.filter(has_expiry=True, expiry_date__lt=today, exists=True)
         count = expired_docs.count()
         if count:
             names = ", ".join(
@@ -411,6 +434,18 @@ class RdsAdminSite(admin.AdminSite):
             dj_messages.warning(
                 request,
                 f"Atenție: există {tcount} document(e) eligibilitate psiholog expirate{tsuffix}.",
+            )
+        # Parents without phone number
+        parents_no_phone = Parent.objects.filter(phone_number__isnull=True) | Parent.objects.filter(phone_number="")
+        pcount = parents_no_phone.count()
+        if pcount:
+            pnames = ", ".join(
+                str(p) for p in parents_no_phone[:5]
+            )
+            psuffix = f" (primii 5: {pnames})" if pcount > 5 else f": {pnames}"
+            dj_messages.warning(
+                request,
+                f"Atenție: {pcount} părinte(i) nu au completat numărul de telefon{psuffix}.",
             )
         return super().index(request, extra_context=extra_context)
 
@@ -437,7 +472,7 @@ class RdsAdminSite(admin.AdminSite):
 
         sections = [
             group("persoane",   "Persoane",   ["parent", "child", "therapist"]),
-            group("auxiliare",  "Auxiliare",  ["centru", "therapy"]),
+            group("auxiliare",  "Auxiliare",  ["centru", "therapy", "pret"]),
             group("documente",  "Documente",  ["document", "therapistdocument"]),
         ]
         if request.user.is_superuser:
@@ -510,12 +545,12 @@ class DocumentInline(admin.TabularInline):
     model = Document
     form = DocumentForm
     extra = 1
-    fields = ("name", "exists", "creation_date", "expiry_date", "_expirat")
+    fields = ("name", "exists", "creation_date", "has_expiry", "expiry_date", "_expirat")
     readonly_fields = ("_expirat",)
 
     @admin.display(description="Expirat")
     def _expirat(self, obj):
-        if not obj.expiry_date:
+        if not obj.has_expiry or not obj.expiry_date:
             return "—"
         if obj.expiry_date < date.today():
             return format_html('<span style="color:#ba2121;font-weight:bold">Da</span>')
@@ -695,14 +730,14 @@ class TherapyAdmin(StaffFullAccessMixin, admin.ModelAdmin):
 @admin.register(Document, site=admin_site)
 class DocumentAdmin(StaffFullAccessMixin, admin.ModelAdmin):
     form = DocumentForm
-    list_display = ("name", "child", "exists", "creation_date", "expiry_date", "_expirat")
-    list_filter = ("exists", ExpiratFilter)
+    list_display = ("name", "child", "exists", "creation_date", "has_expiry", "expiry_date", "_expirat")
+    list_filter = ("exists", "has_expiry", ExpiratFilter)
     search_fields = ("name", "child__first_name", "child__last_name")
     autocomplete_fields = ("child",)
 
     @admin.display(description="Expirat")
     def _expirat(self, obj):
-        if not obj.expiry_date:
+        if not obj.has_expiry or not obj.expiry_date:
             return "—"
         if obj.expiry_date < date.today():
             return format_html('<span style="color:#ba2121;font-weight:bold">Da</span>')
@@ -746,6 +781,33 @@ class TherapistDocumentAdmin(StaffFullAccessMixin, admin.ModelAdmin):
         if not obj.pdf_file:
             return "—"
         return format_html('<a href="{}" download>⬇ Descarcă</a>', obj.pdf_file.url)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pret admin
+# ──────────────────────────────────────────────────────────────────────────────
+@admin.register(Pret, site=admin_site)
+class PretAdmin(StaffFullAccessMixin, admin.ModelAdmin):
+    list_display = ("name", "valoare", "editable")
+    list_filter = ("editable",)
+    search_fields = ("name",)
+    readonly_fields = ("name",)
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make 'name' read-only for non-editable entries."""
+        if obj and not obj.editable:
+            return ("name",)
+        return self.readonly_fields
+
+    def get_fields(self, request, obj=None):
+        """Define form field order."""
+        return ("name", "valoare", "editable")
+
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deletion of non-editable entries."""
+        if obj and not obj.editable:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

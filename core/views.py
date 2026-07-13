@@ -12,7 +12,7 @@ from django.shortcuts import redirect, render
 from django.utils.decorators import method_decorator
 from django.views import View
 
-from .models import Child, Therapist, Therapy
+from .models import Child, Therapist, Therapy, Pret
 
 
 def _slot_hours():
@@ -42,9 +42,11 @@ def _therapies_for_date(session_date: date) -> list:
 @method_decorator(staff_member_required, name="dispatch")
 class TherapyBatchView(View):
     template_name = "admin/core/therapy_batch.html"
+    skip_missing_patient = False
 
-    def _base_context(self, request):
+    def _base_context(self, request, initial_date=None):
         return {
+            "initial_date": initial_date or date.today().isoformat(),
             **admin_site_context(request),
             "therapists": list(
                 Therapist.objects.order_by(Lower("last_name"), Lower("first_name")).values("id", "first_name", "last_name")
@@ -69,7 +71,7 @@ class TherapyBatchView(View):
                 return JsonResponse({"error": "invalid date"}, status=400)
             return JsonResponse({"tables": _therapies_for_date(session_date)})
 
-        return render(request, self.template_name, self._base_context(request))
+        return render(request, self.template_name, self._base_context(request, request.GET.get("date")))
 
     def post(self, request):
         selected_date_str = request.POST.get("session_date", "")
@@ -187,6 +189,8 @@ class TherapyBatchView(View):
                     interval_str = "necunoscut"
 
                 if not child_id:
+                    if self.skip_missing_patient:
+                        continue  # silently skip empty slots in prepopulated mode
                     errors.append(f"Tabela {idx_to_display_num[t_idx]}, interval {interval_str}: pacient neselectat.")
                     table_has_errors = True
                     continue
@@ -212,6 +216,7 @@ class TherapyBatchView(View):
                 table_entries.append(Therapy(
                     child=child,
                     therapist=therapist,
+                    centru=therapist.centru,
                     date=session_date,
                     start_time=start_t,
                 ))
@@ -312,7 +317,27 @@ class TherapyBatchView(View):
             f"({deleted} înlocuite)." if deleted else
             f"Orar salvat pentru {session_date}: {len(to_create)} ședință(e)."
         )
-        return redirect("admin:therapy_batch")
+        return redirect(f"/admin/core/therapy/batch/?date={selected_date_str}")
+
+
+@method_decorator(staff_member_required, name="dispatch")
+class TherapyBatchPrepopulatedView(TherapyBatchView):
+    template_name = "admin/core/therapy_batch_prepopulated.html"
+    skip_missing_patient = True
+
+    def _base_context(self, request, initial_date=None):
+        ctx = super()._base_context(request, initial_date)
+        ctx["title"] = "Editează/Adaugă orar prepopulat"
+        return ctx
+
+    def post(self, request):
+        # Same as parent but redirects to prepopulat URL after save
+        selected_date_str = request.POST.get("session_date", "")
+        response = super().post(request)
+        # If it was a redirect to batch, change it to prepopulat
+        if hasattr(response, 'url') and '/batch/' in response.url and '/prepopulat/' not in response.url:
+            return redirect(f"/admin/core/therapy/batch/prepopulat/?date={selected_date_str}")
+        return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -414,41 +439,35 @@ class RaportLunarView(View):
         therapies = (
             Therapy.objects
             .filter(date__year=year, date__month=month)
-            .select_related("child", "therapist")
+            .select_related("child")
         )
 
-        # Build pivot: {(child_id, therapist_id): {day: count}}
+        # Build pivot: {child_id: {day: count}}
         pivot = {}
-        meta  = {}  # key -> (child_display, therapist_display, cnp)
+        meta  = {}  # child_id -> (child_display, cnp)
         for t in therapies:
-            key = (t.child_id, t.therapist_id)
-            if key not in pivot:
-                pivot[key] = {}
-                meta[key] = (
+            cid = t.child_id
+            if cid not in pivot:
+                pivot[cid] = {}
+                meta[cid] = (
                     f"{t.child.last_name} {t.child.first_name}",
-                    f"{t.therapist.last_name} {t.therapist.first_name}",
                     t.child.cnp,
                 )
             d = t.date.day
-            pivot[key][d] = pivot[key].get(d, 0) + 1
+            pivot[cid][d] = pivot[cid].get(d, 0) + 1
 
-        filter_child     = request.GET.get("child", "").strip()
-        filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
-        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
+        filter_child = request.GET.get("child", "").strip()
+        children_list = sorted({v[0] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-            child_name, therapist_name, cnp = meta[key]
+        for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+            child_name, cnp = meta[cid]
             if filter_child and child_name != filter_child:
                 continue
-            if filter_therapist and therapist_name != filter_therapist:
-                continue
-            counts = [(pivot[key].get(d, 0) * 2) or "" for d in days]
+            counts = [(pivot[cid].get(d, 0) * 2) or "" for d in days]
             total  = sum(v for v in counts if v)
             rows.append({
                 "child":     child_name,
-                "therapist": therapist_name,
                 "cnp":       cnp,
                 "counts":    counts,
                 "total":     total,
@@ -463,9 +482,7 @@ class RaportLunarView(View):
             "years": _available_years(),
             "months": list(enumerate(MONTHS_RO))[1:],
             "filter_child": filter_child,
-            "filter_therapist": filter_therapist,
             "children_list": children_list,
-            "therapists_list": therapists_list,
         })
         return render(request, self.template_name, ctx)
 
@@ -481,39 +498,34 @@ class RaportAnualView(View):
         therapies = (
             Therapy.objects
             .filter(date__year=year)
-            .select_related("child", "therapist")
+            .select_related("child")
         )
 
         pivot = {}
         meta  = {}
         for t in therapies:
-            key = (t.child_id, t.therapist_id)
-            if key not in pivot:
-                pivot[key] = {}
-                meta[key] = (
+            cid = t.child_id
+            if cid not in pivot:
+                pivot[cid] = {}
+                meta[cid] = (
                     f"{t.child.last_name} {t.child.first_name}",
-                    f"{t.therapist.last_name} {t.therapist.first_name}",
                     t.child.cnp,
                 )
             m = t.date.month
-            pivot[key][m] = pivot[key].get(m, 0) + 1
-        filter_child     = request.GET.get("child", "").strip()
-        filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
-        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
+            pivot[cid][m] = pivot[cid].get(m, 0) + 1
+        
+        filter_child = request.GET.get("child", "").strip()
+        children_list = sorted({v[0] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-            child_name, therapist_name, cnp = meta[key]
+        for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+            child_name, cnp = meta[cid]
             if filter_child and child_name != filter_child:
                 continue
-            if filter_therapist and therapist_name != filter_therapist:
-                continue
-            counts = [(pivot[key].get(m, 0) * 2) or "" for m in range(1, 13)]
+            counts = [(pivot[cid].get(m, 0) * 2) or "" for m in range(1, 13)]
             total  = sum(v for v in counts if v)
             rows.append({
                 "child":     child_name,
-                "therapist": therapist_name,
                 "cnp":       cnp,
                 "counts":    counts,
                 "total":     total,
@@ -527,9 +539,7 @@ class RaportAnualView(View):
             "years": _available_years(),
             "months": list(enumerate(MONTHS_RO))[1:],
             "filter_child": filter_child,
-            "filter_therapist": filter_therapist,
             "children_list": children_list,
-            "therapists_list": therapists_list,
         })
         return render(request, self.template_name, ctx)
 
@@ -570,39 +580,33 @@ class RaportSaptamanaiView(View):
         therapies = (
             Therapy.objects
             .filter(date__gte=monday, date__lte=sunday)
-            .select_related("child", "therapist")
+            .select_related("child")
         )
 
         pivot = {}
         meta  = {}
         for t in therapies:
-            key = (t.child_id, t.therapist_id)
-            if key not in pivot:
-                pivot[key] = {}
-                meta[key] = (
+            cid = t.child_id
+            if cid not in pivot:
+                pivot[cid] = {}
+                meta[cid] = (
                     f"{t.child.last_name} {t.child.first_name}",
-                    f"{t.therapist.last_name} {t.therapist.first_name}",
                     t.child.cnp,
                 )
-            pivot[key][t.date] = pivot[key].get(t.date, 0) + 1
+            pivot[cid][t.date] = pivot[cid].get(t.date, 0) + 1
 
-        filter_child     = request.GET.get("child", "").strip()
-        filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
-        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
+        filter_child = request.GET.get("child", "").strip()
+        children_list = sorted({v[0] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-            child_name, therapist_name, cnp = meta[key]
+        for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+            child_name, cnp = meta[cid]
             if filter_child and child_name != filter_child:
                 continue
-            if filter_therapist and therapist_name != filter_therapist:
-                continue
-            counts = [(pivot[key].get(d, 0) * 2) or "" for d in days]
+            counts = [(pivot[cid].get(d, 0) * 2) or "" for d in days]
             total  = sum(v for v in counts if v)
             rows.append({
                 "child":     child_name,
-                "therapist": therapist_name,
                 "cnp":       cnp,
                 "counts":    counts,
                 "total":     total,
@@ -619,9 +623,7 @@ class RaportSaptamanaiView(View):
             "years": _available_years(),
             "weeks": weeks,
             "filter_child": filter_child,
-            "filter_therapist": filter_therapist,
             "children_list": children_list,
-            "therapists_list": therapists_list,
         })
         return render(request, self.template_name, ctx)
 
@@ -730,36 +732,32 @@ def raport_lunar_excel(request):
     therapies = (
         Therapy.objects
         .filter(date__year=year, date__month=month)
-        .select_related("child", "therapist")
+        .select_related("child")
     )
     pivot, meta = {}, {}
     for t in therapies:
-        key = (t.child_id, t.therapist_id)
-        if key not in pivot:
-            pivot[key] = {}
-            meta[key] = (
+        cid = t.child_id
+        if cid not in pivot:
+            pivot[cid] = {}
+            meta[cid] = (
                 f"{t.child.last_name} {t.child.first_name}",
-                f"{t.therapist.last_name} {t.therapist.first_name}",
                 t.child.cnp,
             )
         d = t.date.day
-        pivot[key][d] = pivot[key].get(d, 0) + 1
+        pivot[cid][d] = pivot[cid].get(d, 0) + 1
 
-    filter_child     = request.GET.get("child", "").strip()
-    filter_therapist = request.GET.get("therapist", "").strip()
+    filter_child = request.GET.get("child", "").strip()
     mul = 2 if hours_mode else 1
-    label = "Ore" if hours_mode else "Şedințe"
-    headers = ["Pacient", "Terapeut", "CNP"] + [str(d) for d in days] + [f"Total {label}"]
+    label = "Ore" if hours_mode else "Ședințe"
+    headers = ["Pacient", "CNP"] + [str(d) for d in days] + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-        child_name, therapist_name, cnp = meta[key]
+    for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+        child_name, cnp = meta[cid]
         if filter_child and child_name != filter_child:
             continue
-        if filter_therapist and therapist_name != filter_therapist:
-            continue
-        counts = [pivot[key].get(d, "") for d in days]
+        counts = [pivot[cid].get(d, "") for d in days]
         total  = sum(v for v in counts if v) * mul
-        rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
+        rows.append([child_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
@@ -776,36 +774,32 @@ def raport_anual_excel(request):
     therapies = (
         Therapy.objects
         .filter(date__year=year)
-        .select_related("child", "therapist")
+        .select_related("child")
     )
     pivot, meta = {}, {}
     for t in therapies:
-        key = (t.child_id, t.therapist_id)
-        if key not in pivot:
-            pivot[key] = {}
-            meta[key] = (
+        cid = t.child_id
+        if cid not in pivot:
+            pivot[cid] = {}
+            meta[cid] = (
                 f"{t.child.last_name} {t.child.first_name}",
-                f"{t.therapist.last_name} {t.therapist.first_name}",
                 t.child.cnp,
             )
         m = t.date.month
-        pivot[key][m] = pivot[key].get(m, 0) + 1
+        pivot[cid][m] = pivot[cid].get(m, 0) + 1
 
-    filter_child     = request.GET.get("child", "").strip()
-    filter_therapist = request.GET.get("therapist", "").strip()
+    filter_child = request.GET.get("child", "").strip()
     mul = 2 if hours_mode else 1
-    label = "Ore" if hours_mode else "Şedințe"
-    headers = ["Pacient", "Terapeut", "CNP"] + MONTHS_RO[1:] + [f"Total {label}"]
+    label = "Ore" if hours_mode else "Ședințe"
+    headers = ["Pacient", "CNP"] + MONTHS_RO[1:] + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-        child_name, therapist_name, cnp = meta[key]
+    for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+        child_name, cnp = meta[cid]
         if filter_child and child_name != filter_child:
             continue
-        if filter_therapist and therapist_name != filter_therapist:
-            continue
-        counts = [pivot[key].get(m, "") for m in range(1, 13)]
+        counts = [pivot[cid].get(m, "") for m in range(1, 13)]
         total  = sum(v for v in counts if v) * mul
-        rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
+        rows.append([child_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
@@ -827,41 +821,307 @@ def raport_saptamanal_excel(request):
     therapies = (
         Therapy.objects
         .filter(date__gte=monday, date__lte=sunday)
-        .select_related("child", "therapist")
+        .select_related("child")
     )
     pivot, meta = {}, {}
     for t in therapies:
-        key = (t.child_id, t.therapist_id)
-        if key not in pivot:
-            pivot[key] = {}
-            meta[key] = (
+        cid = t.child_id
+        if cid not in pivot:
+            pivot[cid] = {}
+            meta[cid] = (
                 f"{t.child.last_name} {t.child.first_name}",
-                f"{t.therapist.last_name} {t.therapist.first_name}",
                 t.child.cnp,
             )
-        pivot[key][t.date] = pivot[key].get(t.date, 0) + 1
+        pivot[cid][t.date] = pivot[cid].get(t.date, 0) + 1
 
     mul = 2 if hours_mode else 1
-    label = "Ore" if hours_mode else "Şedințe"
-    filter_child     = request.GET.get("child", "").strip()
-    filter_therapist = request.GET.get("therapist", "").strip()
+    label = "Ore" if hours_mode else "Ședințe"
+    filter_child = request.GET.get("child", "").strip()
     day_labels = [f"{DAYS_RO[d.weekday()]} {d.strftime('%d.%m')}" for d in days]
-    headers = ["Pacient", "Terapeut", "CNP"] + day_labels + [f"Total {label}"]
+    headers = ["Pacient", "CNP"] + day_labels + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-        child_name, therapist_name, cnp = meta[key]
+    for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+        child_name, cnp = meta[cid]
         if filter_child and child_name != filter_child:
             continue
-        if filter_therapist and therapist_name != filter_therapist:
-            continue
-        counts = [pivot[key].get(d, "") for d in days]
+        counts = [pivot[cid].get(d, "") for d in days]
         total  = sum(v for v in counts if v) * mul
-        rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
+        rows.append([child_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
     data = _make_excel(f"S{week} {year}", headers, rows)
     return _excel_response(data, f"raport_saptamanal_{year}_S{week:02d}{suffix}_{ts}.xlsx")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Raport zilnic per terapeut (detaliat cu CNP și tarif)
+# ──────────────────────────────────────────────────────────────────────────────
+@method_decorator(staff_member_required, name="dispatch")
+class RaportZilnicTerapeutView(View):
+    template_name = "admin/core/raport_zilnic_terapeut.html"
+
+    def get(self, request):
+        today = date.today()
+        year = int(request.GET.get("year", today.year))
+        month = int(request.GET.get("month", today.month))
+        therapist_id_str = request.GET.get("terapeut_id", "")
+        
+        try:
+            therapist_id = int(therapist_id_str) if therapist_id_str else None
+        except (ValueError, TypeError):
+            therapist_id = None
+        
+        therapists = Therapist.objects.all().order_by(Lower("last_name"), Lower("first_name"))
+        
+        selected_therapist = None
+        rows = []
+        total_hours = 0
+        total_amount = 0
+        
+        if therapist_id:
+            try:
+                selected_therapist = Therapist.objects.get(pk=therapist_id)
+            except Therapist.DoesNotExist:
+                selected_therapist = None
+        
+        if selected_therapist:
+            # Fetch all therapies for this therapist during the selected month
+            therapies = (
+                Therapy.objects
+                .filter(therapist_id=therapist_id, date__year=year, date__month=month)
+                .select_related("child")
+                .order_by("child__last_name", "child__first_name")
+            )
+            
+            # Group by child to count sessions
+            child_counts = {}
+            child_names = {}
+            child_cnps = {}
+            for therapy in therapies:
+                cid = therapy.child_id
+                child_counts[cid] = child_counts.get(cid, 0) + 1
+                child_names[cid] = f"{therapy.child.first_name} {therapy.child.last_name}"
+                child_cnps[cid] = therapy.child.cnp
+            
+            # Get standard therapy rate
+            try:
+                pret_rate = Pret.objects.get(name="Taxa terapie standard")
+                rate_value = int(pret_rate.valoare)
+            except Pret.DoesNotExist:
+                rate_value = 135
+            
+            # Build rows
+            for idx, (cid, cnt) in enumerate(sorted(child_counts.items(), key=lambda x: child_names[x[0]].lower()), 1):
+                hours = cnt * 2
+                amount = hours * rate_value
+                rows.append({
+                    "nr_crt": idx,
+                    "cnp": child_cnps[cid],
+                    "hours": hours,
+                    "rate": rate_value,
+                    "amount": amount,
+                })
+                total_hours += hours
+                total_amount += amount
+        
+        month_name = MONTHS_RO[month]
+        ctx = _report_context(
+            request, 
+            f"Raport terapeut – {month_name} {year}"
+        )
+        ctx.update({
+            "year": year,
+            "month": month,
+            "month_name": month_name,
+            "therapists": therapists,
+            "selected_therapist": selected_therapist,
+            "selected_therapist_id": therapist_id,
+            "rows": rows,
+            "total_hours": total_hours,
+            "total_amount": total_amount,
+            "available_years": _available_years(),
+        })
+        return render(request, self.template_name, ctx)
+
+
+@staff_member_required
+def raport_terapeut_excel(request):
+    """Generate Excel for raport terapeut (monthly) with full headers."""
+    year_str = request.GET.get("year", str(date.today().year))
+    month_str = request.GET.get("month", str(date.today().month))
+    therapist_id_str = request.GET.get("terapeut_id", "")
+    
+    try:
+        year = int(year_str)
+        month = int(month_str)
+    except (ValueError, TypeError):
+        return HttpResponse("Dată invalidă", status=400)
+    
+    try:
+        therapist_id = int(therapist_id_str)
+    except (ValueError, TypeError):
+        return HttpResponse("Terapeut invalid", status=400)
+    
+    try:
+        therapist = Therapist.objects.get(pk=therapist_id)
+    except Therapist.DoesNotExist:
+        return HttpResponse("Terapeut nu găsit", status=404)
+    
+    # Fetch therapies for the month
+    therapies = (
+        Therapy.objects
+        .filter(therapist_id=therapist_id, date__year=year, date__month=month)
+        .select_related("child")
+        .order_by("child__last_name", "child__first_name")
+    )
+    
+    # Group by child
+    child_counts = {}
+    child_names = {}
+    child_cnps = {}
+    for therapy in therapies:
+        cid = therapy.child_id
+        child_counts[cid] = child_counts.get(cid, 0) + 1
+        child_names[cid] = f"{therapy.child.first_name} {therapy.child.last_name}"
+        child_cnps[cid] = therapy.child.cnp
+    
+    # Get standard therapy rate
+    try:
+        pret_rate = Pret.objects.get(name="Taxa terapie standard")
+        rate_value = int(pret_rate.valoare)
+    except Pret.DoesNotExist:
+        rate_value = 135
+    
+    # Build Excel rows
+    data_rows = []
+    total_hours = 0
+    total_amount = 0
+    
+    for idx, (cid, cnt) in enumerate(sorted(child_counts.items(), key=lambda x: child_names[x[0]].lower()), 1):
+        hours = cnt * 2
+        amount = hours * rate_value
+        data_rows.append([
+            idx,  # Nr. crt.
+            child_cnps[cid],  # CNP
+            hours,  # Număr servicii conexe (ore)
+            rate_value,  # Tarif
+            amount,  # Suma
+        ])
+        total_hours += hours
+        total_amount += amount
+    
+    # Build headers and subheaders
+    headers = [
+        "Nr. crt.",
+        "CNP bolnav beneficiar de servicii conexe actului medical acordate persoanelor diagnosticate cu TSA",
+        "Număr de servicii conexe",
+        "Tarif serviciu conex",
+        "Sumă decontată",
+    ]
+    
+    subheaders = [
+        "C0",
+        "C1",
+        "C2",
+        "C3",
+        "C4=C2*C3",
+    ]
+    
+    # Add total row
+    total_row = [
+        "",  # Nr. crt.
+        "Total",  # CNP
+        total_hours,  # Total ore
+        "",  # Tarif
+        total_amount,  # Total amount
+    ]
+    
+    # Create Excel workbook
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Raport"
+    
+    # Add headers (row 1)
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="0066CC", end_color="0066CC", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    
+    # Add subheaders (row 2)
+    for col_idx, subheader in enumerate(subheaders, 1):
+        cell = ws.cell(row=2, column=col_idx, value=subheader)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Add data rows (starting from row 3)
+    for row_idx, row_data in enumerate(data_rows, 3):
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            if col_idx in [3, 4, 5]:  # Hours, Tarif, Amount columns - all integers
+                cell.number_format = '0'
+            
+            # Apply specific alignment per column
+            if col_idx == 1:  # Nr. crt. - center
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx == 2:  # CNP - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif col_idx == 3:  # Ore - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif col_idx == 4:  # Tarif - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            elif col_idx == 5:  # Suma - right
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+    
+    # Add total row
+    total_row_idx = len(data_rows) + 3
+    for col_idx, value in enumerate(total_row, 1):
+        cell = ws.cell(row=total_row_idx, column=col_idx, value=value)
+        cell.font = Font(bold=True)
+        if col_idx in [3, 4, 5]:  # Hours, Tarif, Amount columns - all integers
+            cell.number_format = '0'
+        cell.fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
+        
+        # Apply specific alignment per column in total row
+        if col_idx == 1:  # Nr. crt. - center
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        elif col_idx == 2:  # CNP "Total" - left
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        elif col_idx == 3:  # Total Ore - right
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+        elif col_idx == 4:  # Tarif (empty) - left
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        elif col_idx == 5:  # Total Suma - right
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+    
+    # Adjust column widths
+    ws.column_dimensions['A'].width = 10
+    ws.column_dimensions['B'].width = 25
+    ws.column_dimensions['C'].width = 15
+    ws.column_dimensions['D'].width = 15
+    ws.column_dimensions['E'].width = 15
+    
+    # Generate Excel file
+    excel_buffer = io.BytesIO()
+    wb.save(excel_buffer)
+    excel_buffer.seek(0)
+    
+    ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
+    therapist_name = f"{therapist.last_name}_{therapist.first_name}".replace(" ", "_").lower()
+    month_name = MONTHS_RO[month]
+    
+    response = HttpResponse(
+        excel_buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response['Content-Disposition'] = (
+        f'attachment; filename="raport_terapeut_{therapist_name}_{month_name}_{year}_{ts}.xlsx"'
+    )
+    return response
 
 
 # ──────────────────────────────────────────────────────────────────────────────
