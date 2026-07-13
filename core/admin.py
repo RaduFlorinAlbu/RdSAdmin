@@ -435,6 +435,18 @@ class RdsAdminSite(admin.AdminSite):
                 request,
                 f"Atenție: există {tcount} document(e) eligibilitate psiholog expirate{tsuffix}.",
             )
+        # Parents without phone number
+        parents_no_phone = Parent.objects.filter(phone_number__isnull=True) | Parent.objects.filter(phone_number="")
+        pcount = parents_no_phone.count()
+        if pcount:
+            pnames = ", ".join(
+                str(p) for p in parents_no_phone[:5]
+            )
+            psuffix = f" (primii 5: {pnames})" if pcount > 5 else f": {pnames}"
+            dj_messages.warning(
+                request,
+                f"Atenție: {pcount} părinte(i) nu au completat numărul de telefon{psuffix}.",
+            )
         return super().index(request, extra_context=extra_context)
 
     def get_app_list(self, request, app_label=None):

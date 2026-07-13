@@ -439,41 +439,35 @@ class RaportLunarView(View):
         therapies = (
             Therapy.objects
             .filter(date__year=year, date__month=month)
-            .select_related("child", "therapist")
+            .select_related("child")
         )
 
-        # Build pivot: {(child_id, therapist_id): {day: count}}
+        # Build pivot: {child_id: {day: count}}
         pivot = {}
-        meta  = {}  # key -> (child_display, therapist_display, cnp)
+        meta  = {}  # child_id -> (child_display, cnp)
         for t in therapies:
-            key = (t.child_id, t.therapist_id)
-            if key not in pivot:
-                pivot[key] = {}
-                meta[key] = (
+            cid = t.child_id
+            if cid not in pivot:
+                pivot[cid] = {}
+                meta[cid] = (
                     f"{t.child.last_name} {t.child.first_name}",
-                    f"{t.therapist.last_name} {t.therapist.first_name}",
                     t.child.cnp,
                 )
             d = t.date.day
-            pivot[key][d] = pivot[key].get(d, 0) + 1
+            pivot[cid][d] = pivot[cid].get(d, 0) + 1
 
-        filter_child     = request.GET.get("child", "").strip()
-        filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
-        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
+        filter_child = request.GET.get("child", "").strip()
+        children_list = sorted({v[0] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-            child_name, therapist_name, cnp = meta[key]
+        for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+            child_name, cnp = meta[cid]
             if filter_child and child_name != filter_child:
                 continue
-            if filter_therapist and therapist_name != filter_therapist:
-                continue
-            counts = [(pivot[key].get(d, 0) * 2) or "" for d in days]
+            counts = [(pivot[cid].get(d, 0) * 2) or "" for d in days]
             total  = sum(v for v in counts if v)
             rows.append({
                 "child":     child_name,
-                "therapist": therapist_name,
                 "cnp":       cnp,
                 "counts":    counts,
                 "total":     total,
@@ -488,9 +482,7 @@ class RaportLunarView(View):
             "years": _available_years(),
             "months": list(enumerate(MONTHS_RO))[1:],
             "filter_child": filter_child,
-            "filter_therapist": filter_therapist,
             "children_list": children_list,
-            "therapists_list": therapists_list,
         })
         return render(request, self.template_name, ctx)
 
@@ -506,39 +498,34 @@ class RaportAnualView(View):
         therapies = (
             Therapy.objects
             .filter(date__year=year)
-            .select_related("child", "therapist")
+            .select_related("child")
         )
 
         pivot = {}
         meta  = {}
         for t in therapies:
-            key = (t.child_id, t.therapist_id)
-            if key not in pivot:
-                pivot[key] = {}
-                meta[key] = (
+            cid = t.child_id
+            if cid not in pivot:
+                pivot[cid] = {}
+                meta[cid] = (
                     f"{t.child.last_name} {t.child.first_name}",
-                    f"{t.therapist.last_name} {t.therapist.first_name}",
                     t.child.cnp,
                 )
             m = t.date.month
-            pivot[key][m] = pivot[key].get(m, 0) + 1
-        filter_child     = request.GET.get("child", "").strip()
-        filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
-        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
+            pivot[cid][m] = pivot[cid].get(m, 0) + 1
+        
+        filter_child = request.GET.get("child", "").strip()
+        children_list = sorted({v[0] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-            child_name, therapist_name, cnp = meta[key]
+        for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+            child_name, cnp = meta[cid]
             if filter_child and child_name != filter_child:
                 continue
-            if filter_therapist and therapist_name != filter_therapist:
-                continue
-            counts = [(pivot[key].get(m, 0) * 2) or "" for m in range(1, 13)]
+            counts = [(pivot[cid].get(m, 0) * 2) or "" for m in range(1, 13)]
             total  = sum(v for v in counts if v)
             rows.append({
                 "child":     child_name,
-                "therapist": therapist_name,
                 "cnp":       cnp,
                 "counts":    counts,
                 "total":     total,
@@ -552,9 +539,7 @@ class RaportAnualView(View):
             "years": _available_years(),
             "months": list(enumerate(MONTHS_RO))[1:],
             "filter_child": filter_child,
-            "filter_therapist": filter_therapist,
             "children_list": children_list,
-            "therapists_list": therapists_list,
         })
         return render(request, self.template_name, ctx)
 
@@ -595,39 +580,33 @@ class RaportSaptamanaiView(View):
         therapies = (
             Therapy.objects
             .filter(date__gte=monday, date__lte=sunday)
-            .select_related("child", "therapist")
+            .select_related("child")
         )
 
         pivot = {}
         meta  = {}
         for t in therapies:
-            key = (t.child_id, t.therapist_id)
-            if key not in pivot:
-                pivot[key] = {}
-                meta[key] = (
+            cid = t.child_id
+            if cid not in pivot:
+                pivot[cid] = {}
+                meta[cid] = (
                     f"{t.child.last_name} {t.child.first_name}",
-                    f"{t.therapist.last_name} {t.therapist.first_name}",
                     t.child.cnp,
                 )
-            pivot[key][t.date] = pivot[key].get(t.date, 0) + 1
+            pivot[cid][t.date] = pivot[cid].get(t.date, 0) + 1
 
-        filter_child     = request.GET.get("child", "").strip()
-        filter_therapist = request.GET.get("therapist", "").strip()
-        children_list    = sorted({v[0] for v in meta.values()}, key=str.lower)
-        therapists_list  = sorted({v[1] for v in meta.values()}, key=str.lower)
+        filter_child = request.GET.get("child", "").strip()
+        children_list = sorted({v[0] for v in meta.values()}, key=str.lower)
 
         rows = []
-        for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-            child_name, therapist_name, cnp = meta[key]
+        for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+            child_name, cnp = meta[cid]
             if filter_child and child_name != filter_child:
                 continue
-            if filter_therapist and therapist_name != filter_therapist:
-                continue
-            counts = [(pivot[key].get(d, 0) * 2) or "" for d in days]
+            counts = [(pivot[cid].get(d, 0) * 2) or "" for d in days]
             total  = sum(v for v in counts if v)
             rows.append({
                 "child":     child_name,
-                "therapist": therapist_name,
                 "cnp":       cnp,
                 "counts":    counts,
                 "total":     total,
@@ -644,9 +623,7 @@ class RaportSaptamanaiView(View):
             "years": _available_years(),
             "weeks": weeks,
             "filter_child": filter_child,
-            "filter_therapist": filter_therapist,
             "children_list": children_list,
-            "therapists_list": therapists_list,
         })
         return render(request, self.template_name, ctx)
 
@@ -755,36 +732,32 @@ def raport_lunar_excel(request):
     therapies = (
         Therapy.objects
         .filter(date__year=year, date__month=month)
-        .select_related("child", "therapist")
+        .select_related("child")
     )
     pivot, meta = {}, {}
     for t in therapies:
-        key = (t.child_id, t.therapist_id)
-        if key not in pivot:
-            pivot[key] = {}
-            meta[key] = (
+        cid = t.child_id
+        if cid not in pivot:
+            pivot[cid] = {}
+            meta[cid] = (
                 f"{t.child.last_name} {t.child.first_name}",
-                f"{t.therapist.last_name} {t.therapist.first_name}",
                 t.child.cnp,
             )
         d = t.date.day
-        pivot[key][d] = pivot[key].get(d, 0) + 1
+        pivot[cid][d] = pivot[cid].get(d, 0) + 1
 
-    filter_child     = request.GET.get("child", "").strip()
-    filter_therapist = request.GET.get("therapist", "").strip()
+    filter_child = request.GET.get("child", "").strip()
     mul = 2 if hours_mode else 1
-    label = "Ore" if hours_mode else "Şedințe"
-    headers = ["Pacient", "Terapeut", "CNP"] + [str(d) for d in days] + [f"Total {label}"]
+    label = "Ore" if hours_mode else "Ședințe"
+    headers = ["Pacient", "CNP"] + [str(d) for d in days] + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-        child_name, therapist_name, cnp = meta[key]
+    for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+        child_name, cnp = meta[cid]
         if filter_child and child_name != filter_child:
             continue
-        if filter_therapist and therapist_name != filter_therapist:
-            continue
-        counts = [pivot[key].get(d, "") for d in days]
+        counts = [pivot[cid].get(d, "") for d in days]
         total  = sum(v for v in counts if v) * mul
-        rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
+        rows.append([child_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
@@ -801,36 +774,32 @@ def raport_anual_excel(request):
     therapies = (
         Therapy.objects
         .filter(date__year=year)
-        .select_related("child", "therapist")
+        .select_related("child")
     )
     pivot, meta = {}, {}
     for t in therapies:
-        key = (t.child_id, t.therapist_id)
-        if key not in pivot:
-            pivot[key] = {}
-            meta[key] = (
+        cid = t.child_id
+        if cid not in pivot:
+            pivot[cid] = {}
+            meta[cid] = (
                 f"{t.child.last_name} {t.child.first_name}",
-                f"{t.therapist.last_name} {t.therapist.first_name}",
                 t.child.cnp,
             )
         m = t.date.month
-        pivot[key][m] = pivot[key].get(m, 0) + 1
+        pivot[cid][m] = pivot[cid].get(m, 0) + 1
 
-    filter_child     = request.GET.get("child", "").strip()
-    filter_therapist = request.GET.get("therapist", "").strip()
+    filter_child = request.GET.get("child", "").strip()
     mul = 2 if hours_mode else 1
-    label = "Ore" if hours_mode else "Şedințe"
-    headers = ["Pacient", "Terapeut", "CNP"] + MONTHS_RO[1:] + [f"Total {label}"]
+    label = "Ore" if hours_mode else "Ședințe"
+    headers = ["Pacient", "CNP"] + MONTHS_RO[1:] + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-        child_name, therapist_name, cnp = meta[key]
+    for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+        child_name, cnp = meta[cid]
         if filter_child and child_name != filter_child:
             continue
-        if filter_therapist and therapist_name != filter_therapist:
-            continue
-        counts = [pivot[key].get(m, "") for m in range(1, 13)]
+        counts = [pivot[cid].get(m, "") for m in range(1, 13)]
         total  = sum(v for v in counts if v) * mul
-        rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
+        rows.append([child_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
@@ -852,36 +821,32 @@ def raport_saptamanal_excel(request):
     therapies = (
         Therapy.objects
         .filter(date__gte=monday, date__lte=sunday)
-        .select_related("child", "therapist")
+        .select_related("child")
     )
     pivot, meta = {}, {}
     for t in therapies:
-        key = (t.child_id, t.therapist_id)
-        if key not in pivot:
-            pivot[key] = {}
-            meta[key] = (
+        cid = t.child_id
+        if cid not in pivot:
+            pivot[cid] = {}
+            meta[cid] = (
                 f"{t.child.last_name} {t.child.first_name}",
-                f"{t.therapist.last_name} {t.therapist.first_name}",
                 t.child.cnp,
             )
-        pivot[key][t.date] = pivot[key].get(t.date, 0) + 1
+        pivot[cid][t.date] = pivot[cid].get(t.date, 0) + 1
 
     mul = 2 if hours_mode else 1
-    label = "Ore" if hours_mode else "Şedințe"
-    filter_child     = request.GET.get("child", "").strip()
-    filter_therapist = request.GET.get("therapist", "").strip()
+    label = "Ore" if hours_mode else "Ședințe"
+    filter_child = request.GET.get("child", "").strip()
     day_labels = [f"{DAYS_RO[d.weekday()]} {d.strftime('%d.%m')}" for d in days]
-    headers = ["Pacient", "Terapeut", "CNP"] + day_labels + [f"Total {label}"]
+    headers = ["Pacient", "CNP"] + day_labels + [f"Total {label}"]
     rows = []
-    for key in sorted(meta, key=lambda k: (meta[k][0].lower(), meta[k][1].lower())):
-        child_name, therapist_name, cnp = meta[key]
+    for cid in sorted(meta, key=lambda k: meta[k][0].lower()):
+        child_name, cnp = meta[cid]
         if filter_child and child_name != filter_child:
             continue
-        if filter_therapist and therapist_name != filter_therapist:
-            continue
-        counts = [pivot[key].get(d, "") for d in days]
+        counts = [pivot[cid].get(d, "") for d in days]
         total  = sum(v for v in counts if v) * mul
-        rows.append([child_name, therapist_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
+        rows.append([child_name, cnp] + [(v * mul if v else "") for v in counts] + [total])
 
     suffix = "_ore" if hours_mode else "_sedinte"
     ts = datetime.now().strftime("%d_%m_%Y_%H_%M")
